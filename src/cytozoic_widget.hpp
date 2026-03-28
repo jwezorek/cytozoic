@@ -4,7 +4,7 @@
 #include <QPoint>
 #include <QSize>
 #include <QWidget>
-#include "geometric_types.hpp"
+#include "types.hpp"
 
 namespace cz {
 

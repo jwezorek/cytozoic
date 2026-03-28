@@ -1,7 +1,7 @@
 #pragma once
 
 #include <vector>
-#include "geometric_types.hpp"
+#include "types.hpp"
 
 namespace cz {
 
