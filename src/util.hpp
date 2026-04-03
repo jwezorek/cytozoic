@@ -11,4 +11,7 @@ namespace cz {
         std::optional<uint64_t> seed = {}
     );
 
+    cyto_frame to_cyto_frame(const cyto_state& state, const color_table& colors);
+    cyto_state blank_state(const voronoi_diagram& v);
+
 }

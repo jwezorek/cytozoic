@@ -7,10 +7,18 @@
 #include <QPen>
 #include <QResizeEvent>
 
+#include <ranges>
+
+namespace r = std::ranges;
+namespace rv = std::ranges::views;
+
+/*------------------------------------------------------------------------------------------------*/
+
 cz::cytozoic_widget::cytozoic_widget(QWidget* parent, double log_wd, double log_hgt) : 
         QWidget(parent), 
         logical_wd_(log_wd),
-        logical_hgt_(log_hgt) {
+        logical_hgt_(log_hgt),
+        show_cell_nuclei_(false) {
     // These help Qt treat this as a fully self-painted widget and reduce flicker.
     setAttribute(Qt::WA_OpaquePaintEvent);
     setAttribute(Qt::WA_NoSystemBackground);
@@ -60,7 +68,7 @@ const QImage& cz::cytozoic_widget::framebuffer() const noexcept {
     return framebuffer_;
 }
 
-void cz::cytozoic_widget::set(const voronoi_diagram& v) {
+void cz::cytozoic_widget::set(const cyto_frame& v) {
     ensure_framebuffer_matches_widget_size();
 
     if (framebuffer_.isNull()) {
@@ -69,52 +77,44 @@ void cz::cytozoic_widget::set(const voronoi_diagram& v) {
 
     framebuffer_.fill(Qt::black);
 
+    auto to_pixel = [this](const cz::point& p) -> QPointF {
+        const double sx = framebuffer_.width() / logical_wd_;
+        const double sy = framebuffer_.height() / logical_hgt_;
+        return QPointF(p.x * sx, p.y * sy);
+        };
+
     QPainter painter(&framebuffer_);
     painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(Qt::black, 1.0));
 
-    const double sx = logical_wd_ != 0.0
-        ? static_cast<double>(framebuffer_.width()) / logical_wd_
-        : 1.0;
+    
+    for (const auto& c : v ) {
 
-    const double sy = logical_hgt_ != 0.0
-        ? static_cast<double>(framebuffer_.height()) / logical_hgt_
-        : 1.0;
-
-    auto to_qpointf = [&](const cz::point& p) -> QPointF {
-        return {
-            p.x * sx,
-            p.y * sy
-        };
-        };
-
-    QPen edge_pen(QColor(200, 200, 200));
-    edge_pen.setWidthF(1.0);
-    painter.setPen(edge_pen);
-    painter.setBrush(Qt::NoBrush);
-
-    for (const auto& cell : v) {
-        if (cell.cell.empty()) {
+        if (c.shape.empty()) {
             continue;
         }
 
         QPolygonF poly;
-        poly.reserve(static_cast<int>(cell.cell.size()));
+        poly.reserve(static_cast<int>(c.shape.size()));
 
-        for (const auto& p : cell.cell) {
-            poly << to_qpointf(p);
+        for (const auto& p : c.shape) {
+            poly.push_back(to_pixel(p));
         }
 
+        painter.setBrush(QColor(c.color.r, c.color.g, c.color.b));
         painter.drawPolygon(poly);
     }
 
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(255, 80, 80));
+    if (show_cell_nuclei_) {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(Qt::white);
 
-    constexpr double site_radius = 2.5;
+        constexpr double nucleus_radius = 3.0;
 
-    for (const auto& cell : v) {
-        const auto q = to_qpointf(cell.site);
-        painter.drawEllipse(q, site_radius, site_radius);
+        for (const auto& c : v) {
+            const QPointF center = to_pixel(c.seed);
+            painter.drawEllipse(center, nucleus_radius, nucleus_radius);
+        }
     }
 
     update();
@@ -131,16 +131,20 @@ void cz::cytozoic_widget::paintEvent(QPaintEvent* event) {
         return;
     }
 
-    // Draw the backing image directly to the widget.
-    // Right now this stretches to fit the widget exactly.
-    // If later you want 1:1 pixels, integer scaling, camera transforms, etc.,
-    // this is the place to change it.
     painter.drawImage(rect(), framebuffer_, framebuffer_.rect());
 }
 
 void cz::cytozoic_widget::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
     ensure_framebuffer_matches_widget_size();
+}
+
+bool cz::cytozoic_widget::show_cell_nuclei() const {
+    return show_cell_nuclei_;
+}
+
+void cz::cytozoic_widget::set_show_cell_nuceli(bool show) {
+    show_cell_nuclei_ = show;
 }
 
 void cz::cytozoic_widget::ensure_framebuffer_matches_widget_size() {

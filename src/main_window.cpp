@@ -34,10 +34,14 @@ void cz::main_window::showEvent(QShowEvent* event) {
     initialized = true;
 
     auto v = cz::construct_voronoi_diagram(
-        cz::random_points(1000),
+        cz::random_points(1000, 1.0, 1.0),
         { {0,0},{1.0,1.0} }
     );
-    canvas_->set(v);
+    auto frame = to_cyto_frame(blank_state(v),
+        std::vector<color>{1, color{ 255,128,55 }}
+    );
+    canvas_->set_show_cell_nuceli(true);
+    canvas_->set(frame);
 }
 
 void cz::main_window::create_menus() {

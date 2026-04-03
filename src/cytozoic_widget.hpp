@@ -23,7 +23,9 @@ namespace cz {
 
         const QImage& framebuffer() const noexcept;
 
-        void set(const voronoi_diagram& v);
+        void set(const cyto_frame& cs);
+        bool show_cell_nuclei() const;
+        void set_show_cell_nuceli(bool show);
 
     protected:
         void paintEvent(QPaintEvent* event) override;
@@ -35,6 +37,7 @@ namespace cz {
         QImage framebuffer_;
         double logical_wd_;
         double logical_hgt_;
+        bool show_cell_nuclei_;
     };
 
 }

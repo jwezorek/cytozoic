@@ -52,6 +52,9 @@ namespace boost::polygon {
 
 namespace {
 
+    constexpr double k_coordinate_scale = 1000000.0;
+    constexpr double k_clip_epsilon = 1e-9;
+
     using cz::detail::int_point;
 
     struct clip_line {
@@ -303,22 +306,14 @@ namespace {
         };
     }
 
-    bool is_valid_bounds(const cz::rect& bounds)
-    {
+    bool is_valid_bounds(const cz::rect& bounds)  {
         return bounds.min_point.x < bounds.max_point.x &&
             bounds.min_point.y < bounds.max_point.y;
     }
 
-    bool is_valid_coordinate_scale(double coordinate_scale)
-    {
-        return std::isfinite(coordinate_scale) && coordinate_scale > 0.0;
-    }
+    bool has_duplicate_site( const std::vector<cz::point>& sites,
+            size_t site_index, double epsilon)  {
 
-    bool has_duplicate_site(
-        const std::vector<cz::point>& sites,
-        size_t site_index,
-        double epsilon)
-    {
         for (size_t i = 0; i < site_index; ++i) {
             if (nearly_equal(sites[i], sites[site_index], epsilon)) {
                 return true;
@@ -389,12 +384,8 @@ namespace {
     }
 
     cz::polygon construct_cell_polygon(
-        const std::vector<cz::point>& sites,
-        size_t site_index,
-        const std::vector<size_t>& neighbors,
-        const cz::rect& bounds,
-        double epsilon)
-    {
+            const std::vector<cz::point>& sites, size_t site_index,
+            const std::vector<size_t>& neighbors, const cz::rect& bounds, double epsilon) {
         if (site_index >= sites.size()) {
             return {};
         }
@@ -439,10 +430,7 @@ namespace {
 
 cz::voronoi_diagram cz::construct_voronoi_diagram(
         const std::vector<cz::point>& sites,
-        const cz::rect& bounds,
-        double coordinate_scale) {
-
-    constexpr double k_clip_epsilon = 1e-9;
+        const cz::rect& bounds) {
 
     if (sites.empty()) {
         return {};
@@ -452,18 +440,18 @@ cz::voronoi_diagram cz::construct_voronoi_diagram(
         return {};
     }
 
-    if (!is_valid_coordinate_scale(coordinate_scale)) {
-        return {};
-    }
-
     std::vector<voronoi_cell> result(sites.size());
 
     const std::vector<std::vector<size_t>> neighbors =
-        build_neighbor_lists(sites, coordinate_scale);
+        build_neighbor_lists(sites, k_coordinate_scale);
 
     for (size_t i = 0; i < sites.size(); ++i) {
+
         result[i].site = sites[i];
         result[i].neighbors = neighbors[i];
+        if (neighbors[i].empty()) {
+            continue;
+        }
         result[i].cell = construct_cell_polygon(
             sites,
             i,

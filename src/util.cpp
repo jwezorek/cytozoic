@@ -1,5 +1,11 @@
 #include "util.hpp"
 #include <random>
+#include <ranges>
+
+namespace r = std::ranges;
+namespace rv = std::ranges::views;
+
+/*------------------------------------------------------------------------------------------------*/
 
 namespace {
 
@@ -44,4 +50,26 @@ std::vector<cz::point> cz::random_points(
     }
 
     return points;
+}
+
+cz::cyto_frame cz::to_cyto_frame(const cyto_state& state, const color_table& colors) {
+    return rv::zip(state.cells, state.states) |
+        rv::transform(
+            [&](auto&& cell_state) {
+                const auto& [vor_cell, s] = cell_state;
+                return cell{
+                    .shape = vor_cell.cell,
+                    .color = colors[s],
+                    .seed = vor_cell.site
+                };
+            }
+        ) | r::to<cyto_frame>();
+}
+
+cz::cyto_state cz::blank_state(const voronoi_diagram& v)
+{
+    return {
+        .cells = v,
+        .states = std::vector<int8_t>(v.size(), int8_t{0})
+    };
 }
