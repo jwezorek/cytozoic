@@ -33,8 +33,11 @@ void cz::main_window::showEvent(QShowEvent* event) {
 
     initialized = true;
 
+    auto seeds = cz::random_points(1000, 1.0, 1.0);
+    seeds = perform_lloyd_relaxation(seeds, { {0,0},{1.0,1.0} }, 0.001, 20);
+
     auto v = cz::construct_voronoi_diagram(
-        cz::random_points(1000, 1.0, 1.0),
+        seeds,
         { {0,0},{1.0,1.0} }
     );
     auto frame = to_cyto_frame(blank_state(v),

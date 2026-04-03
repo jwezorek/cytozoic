@@ -26,10 +26,7 @@ namespace rv = std::ranges::views;
 
 namespace cz::detail {
 
-    struct int_point {
-        std::int64_t x;
-        std::int64_t y;
-    };
+    using int_point = vec2<int64_t>;
 
 } // namespace cz::detail
 
