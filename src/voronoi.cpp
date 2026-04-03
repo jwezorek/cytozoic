@@ -193,9 +193,8 @@ namespace {
     }
 
     std::vector<int_point> scale_points_to_integer_grid(
-        const std::vector<cz::point>& sites,
-        double coordinate_scale)
-    {
+            std::span<const cz::point> sites, double coordinate_scale) {
+
         std::vector<int_point> result;
         result.reserve(sites.size());
 
@@ -296,8 +295,7 @@ namespace {
         return { midpoint, normal };
     }
 
-    cz::polygon rect_to_polygon(const cz::rect& bounds)
-    {
+    cz::polygon rect_to_polygon(const cz::rect& bounds) {
         return {
             {bounds.min_point.x, bounds.min_point.y},
             {bounds.max_point.x, bounds.min_point.y},
@@ -311,7 +309,7 @@ namespace {
             bounds.min_point.y < bounds.max_point.y;
     }
 
-    bool has_duplicate_site( const std::vector<cz::point>& sites,
+    bool has_duplicate_site( std::span<const cz::point> sites,
             size_t site_index, double epsilon)  {
 
         for (size_t i = 0; i < site_index; ++i) {
@@ -324,8 +322,7 @@ namespace {
     }
 
     std::vector<std::vector<size_t>> build_neighbor_lists(
-            const std::vector<cz::point>& sites,
-            double coordinate_scale) {
+            std::span<const cz::point> sites, double coordinate_scale) {
 
         std::vector<std::vector<size_t>> neighbors(sites.size());
 
@@ -384,7 +381,7 @@ namespace {
     }
 
     cz::polygon construct_cell_polygon(
-            const std::vector<cz::point>& sites, size_t site_index,
+            std::span<const cz::point> sites, size_t site_index,
             const std::vector<size_t>& neighbors, const cz::rect& bounds, double epsilon) {
         if (site_index >= sites.size()) {
             return {};
@@ -428,8 +425,7 @@ namespace {
 
 } // namespace
 
-cz::voronoi_diagram cz::construct_voronoi_diagram(
-        const std::vector<cz::point>& sites,
+cz::voronoi_diagram cz::construct_voronoi_diagram(  std::span<const cz::point> sites,
         const cz::rect& bounds) {
 
     if (sites.empty()) {
