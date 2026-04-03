@@ -1,13 +1,11 @@
 #pragma once
 
 #include <vector>
+#include "vec2.hpp"
 
 namespace cz {
 
-    struct point {
-        double x;
-        double y;
-    };
+    using point = vec2<double>;
 
     using polygon = std::vector<point>;
 

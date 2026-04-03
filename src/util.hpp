@@ -3,6 +3,7 @@
 #include "types.hpp"
 #include <vector>
 #include <optional>
+#include <span>
 
 namespace cz {
 
@@ -13,5 +14,8 @@ namespace cz {
 
     cyto_frame to_cyto_frame(const cyto_state& state, const color_table& colors);
     cyto_state blank_state(const voronoi_diagram& v);
-
+    point centroid(std::span<const point> pts);
+    double dot(const point& u, const point& v);
+    double distance(const point& u, const point& v);
+    double magnitude(const point& v);
 }

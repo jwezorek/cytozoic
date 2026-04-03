@@ -1,5 +1,5 @@
 #include "voronoi.hpp"
-
+#include "util.hpp"
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable: 5055)
@@ -17,8 +17,12 @@
 #include <cstdint>
 #include <optional>
 #include <vector>
+#include <limits>
+#include <ranges>
 
 namespace bp = boost::polygon;
+namespace r = std::ranges;
+namespace rv = std::ranges::views;
 
 namespace cz::detail {
 
@@ -61,26 +65,6 @@ namespace {
         cz::point point_on_line;
         cz::point normal;
     };
-
-    double dot(const cz::point& a, const cz::point& b)
-    {
-        return a.x * b.x + a.y * b.y;
-    }
-
-    cz::point subtract(const cz::point& a, const cz::point& b)
-    {
-        return { a.x - b.x, a.y - b.y };
-    }
-
-    cz::point add(const cz::point& a, const cz::point& b)
-    {
-        return { a.x + b.x, a.y + b.y };
-    }
-
-    cz::point multiply(const cz::point& p, double scalar)
-    {
-        return { p.x * scalar, p.y * scalar };
-    }
 
     bool nearly_equal(double a, double b, double epsilon)
     {
@@ -159,8 +143,8 @@ namespace {
                 const cz::point& curr = poly[i];
                 const cz::point& next = poly[(i + 1) % poly.size()];
 
-                const cz::point a = subtract(curr, prev);
-                const cz::point b = subtract(next, curr);
+                const cz::point a = curr - prev;
+                const cz::point b = next - curr;
                 const double cross = a.x * b.y - a.y * b.x;
 
                 if (std::abs(cross) <= epsilon &&
@@ -213,7 +197,7 @@ namespace {
         const clip_line& line,
         double epsilon)
     {
-        const cz::point offset = subtract(p, line.point_on_line);
+        const cz::point offset = p - line.point_on_line;
         return dot(offset, line.normal) <= epsilon;
     }
 
@@ -223,15 +207,15 @@ namespace {
         const clip_line& line,
         double epsilon)
     {
-        const cz::point segment = subtract(b, a);
+        const cz::point segment = b - a;
         const double denominator = dot(segment, line.normal);
 
         if (std::abs(denominator) <= epsilon) {
             return std::nullopt;
         }
 
-        const double t = dot(subtract(line.point_on_line, a), line.normal) / denominator;
-        return add(a, multiply(segment, t));
+        const double t = dot(line.point_on_line - a, line.normal) / denominator;
+        return a + t * segment;
     }
 
     cz::polygon clip_polygon_against_half_plane(
@@ -291,7 +275,7 @@ namespace {
             (site.y + neighbor.y) * 0.5
         };
 
-        const cz::point normal = subtract(neighbor, site);
+        const cz::point normal = neighbor - site;
         return { midpoint, normal };
     }
 
@@ -458,5 +442,44 @@ cz::voronoi_diagram cz::construct_voronoi_diagram(  std::span<const cz::point> s
     }
 
     return result;
+}
+
+std::vector<cz::point> cz::perform_lloyd_relaxation(
+        std::span<const point> sites, const rect& bounds,
+        double min_delta, int max_iterations ) {
+
+    if (sites.empty()) {
+        return {};
+    }
+
+    int iter = 0;
+    double max_delta = std::numeric_limits<double>::max();
+    auto points = sites | r::to<std::vector>();
+
+    while (iter++ < max_iterations && max_delta > min_delta) {
+        auto voronoi = construct_voronoi_diagram(points, bounds);
+
+        auto centroids = voronoi | rv::transform(
+                [](const auto& c) -> point {
+                    if (c.cell.empty()) {
+                        return c.site;
+                    }
+                    return centroid(c.cell);
+                }
+            ) | r::to<std::vector>();
+
+        max_delta = r::max(
+            rv::zip(centroids, points) | rv::transform(
+                [](const auto& pair) -> double {
+                    const auto& [lhs, rhs] = pair;
+                    return distance(lhs, rhs);
+                }
+            )
+        );
+
+        points = std::move(centroids);
+    }
+
+    return points;
 }
 

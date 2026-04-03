@@ -66,10 +66,35 @@ cz::cyto_frame cz::to_cyto_frame(const cyto_state& state, const color_table& col
         ) | r::to<cyto_frame>();
 }
 
-cz::cyto_state cz::blank_state(const voronoi_diagram& v)
-{
+cz::cyto_state cz::blank_state(const voronoi_diagram& v) {
     return {
         .cells = v,
         .states = std::vector<int8_t>(v.size(), int8_t{0})
     };
+}
+
+cz::point cz::centroid(std::span<const point> pts) {
+    if (pts.empty()) {
+        throw std::runtime_error(
+            "attempted to find centroid of an empty point set."
+        );
+    }
+    auto sum = r::fold_left(  pts, point{ 0.0,0.0 }, std::plus<>{} );
+    const double n = static_cast<double>(pts.size());
+    return {
+        sum.x / n, sum.y / n
+    };
+}
+
+double cz::dot(const point& u, const point& v) {
+    return u.x * v.x + u.y * v.y;
+}
+
+double cz::distance(const point& u, const point& v) {
+    auto diff = v - u;
+    return std::sqrt(dot(diff,diff));
+}
+
+double cz::magnitude(const point& u) {
+    return std::sqrt(dot(u, u));
 }

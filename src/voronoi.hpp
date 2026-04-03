@@ -10,5 +10,8 @@ namespace cz {
         std::span<const point> sites, const rect& bounds
     );
 
-    
+    std::vector<point> perform_lloyd_relaxation(
+        std::span<const point> sites, const rect& bounds,
+        double min_delta_thresh, int max_iterations
+    );
 }
