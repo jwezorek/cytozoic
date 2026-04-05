@@ -16,7 +16,9 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <execution>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -125,14 +127,12 @@ namespace {
         poly = std::move(cleaned);
     }
 
-    void remove_collinear_vertices(cz::polygon& poly, double epsilon)
-    {
+    void remove_collinear_vertices(cz::polygon& poly, double epsilon) {
         if (poly.size() < 3) {
             return;
         }
 
         bool changed = true;
-
         while (changed && poly.size() >= 3) {
             changed = false;
             cz::polygon cleaned;
@@ -161,8 +161,7 @@ namespace {
         }
     }
 
-    void normalize_polygon(cz::polygon& poly, double epsilon)
-    {
+    void normalize_polygon(cz::polygon& poly, double epsilon) {
         remove_consecutive_duplicate_vertices(poly, epsilon);
         remove_collinear_vertices(poly, epsilon);
         remove_consecutive_duplicate_vertices(poly, epsilon);
@@ -318,6 +317,10 @@ namespace {
             return neighbors;
         }
 
+        for (auto& cell_neighbors : neighbors) {
+            cell_neighbors.reserve(8);
+        }
+
         const std::vector<int_point> integer_sites =
             scale_points_to_integer_grid(sites, coordinate_scale);
 
@@ -408,9 +411,8 @@ namespace {
 
 } // namespace
 
-cz::voronoi_diagram cz::construct_voronoi_diagram(
-    std::span<const cz::point> sites,
-    const cz::rect& bounds)
+cz::voronoi_diagram cz::construct_voronoi_diagram( 
+        std::span<const cz::point> sites, const cz::rect& bounds) 
 {
     if (sites.empty()) {
         return {};
@@ -425,22 +427,29 @@ cz::voronoi_diagram cz::construct_voronoi_diagram(
     const std::vector<std::vector<size_t>> neighbors =
         build_neighbor_lists(sites, k_coordinate_scale);
 
-    for (size_t i = 0; i < sites.size(); ++i) {
-        result[i].site = sites[i];
-        result[i].neighbors = neighbors[i];
+    std::vector<size_t> indices(sites.size());
+    std::iota(indices.begin(), indices.end(), size_t{ 0 });
 
-        if (neighbors[i].empty()) {
-            continue;
-        }
+    std::for_each(
+        std::execution::par,
+        indices.begin(),
+        indices.end(),
+        [&](size_t i) {
+            result[i].site = sites[i];
+            result[i].neighbors = neighbors[i];
 
-        result[i].cell = construct_cell_polygon(
-            sites,
-            i,
-            neighbors[i],
-            bounds,
-            k_clip_epsilon
-        );
-    }
+            if (neighbors[i].empty()) {
+                return;
+            }
+
+            result[i].cell = construct_cell_polygon(
+                sites,
+                i,
+                neighbors[i],
+                bounds,
+                k_clip_epsilon
+            );
+        });
 
     return result;
 }
