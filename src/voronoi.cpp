@@ -1,5 +1,6 @@
 #include "voronoi.hpp"
 #include "util.hpp"
+
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable: 5055)
@@ -15,10 +16,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
-#include <vector>
 #include <limits>
+#include <optional>
 #include <ranges>
+#include <span>
+#include <vector>
 
 namespace bp = boost::polygon;
 namespace r = std::ranges;
@@ -26,7 +28,7 @@ namespace rv = std::ranges::views;
 
 namespace cz::detail {
 
-    using int_point = vec2<int64_t>;
+    using int_point = vec2<std::int64_t>;
 
 } // namespace cz::detail
 
@@ -115,7 +117,8 @@ namespace {
             }
         }
 
-        if (cleaned.size() >= 2 && nearly_equal(cleaned.front(), cleaned.back(), epsilon)) {
+        if (cleaned.size() >= 2 &&
+            nearly_equal(cleaned.front(), cleaned.back(), epsilon)) {
             cleaned.pop_back();
         }
 
@@ -174,8 +177,9 @@ namespace {
     }
 
     std::vector<int_point> scale_points_to_integer_grid(
-            std::span<const cz::point> sites, double coordinate_scale) {
-
+        std::span<const cz::point> sites,
+        double coordinate_scale)
+    {
         std::vector<int_point> result;
         result.reserve(sites.size());
 
@@ -215,6 +219,13 @@ namespace {
         return a + t * segment;
     }
 
+    void push_if_distinct(cz::polygon& poly, const cz::point& point, double epsilon)
+    {
+        if (poly.empty() || !nearly_equal(poly.back(), point, epsilon)) {
+            poly.push_back(point);
+        }
+    }
+
     cz::polygon clip_polygon_against_half_plane(
         const cz::polygon& input,
         const clip_line& line,
@@ -235,7 +246,7 @@ namespace {
             const bool next_inside = point_is_inside_half_plane(next, line, epsilon);
 
             if (current_inside && next_inside) {
-                output.push_back(next);
+                push_if_distinct(output, next, epsilon);
                 continue;
             }
 
@@ -244,7 +255,7 @@ namespace {
                     intersect_segment_with_line(current, next, line, epsilon);
 
                 if (intersection.has_value()) {
-                    output.push_back(*intersection);
+                    push_if_distinct(output, *intersection, epsilon);
                 }
 
                 continue;
@@ -255,11 +266,16 @@ namespace {
                     intersect_segment_with_line(current, next, line, epsilon);
 
                 if (intersection.has_value()) {
-                    output.push_back(*intersection);
+                    push_if_distinct(output, *intersection, epsilon);
                 }
 
-                output.push_back(next);
+                push_if_distinct(output, next, epsilon);
             }
+        }
+
+        if (output.size() >= 2 &&
+            nearly_equal(output.front(), output.back(), epsilon)) {
+            output.pop_back();
         }
 
         return output;
@@ -276,7 +292,8 @@ namespace {
         return { midpoint, normal };
     }
 
-    cz::polygon rect_to_polygon(const cz::rect& bounds) {
+    cz::polygon rect_to_polygon(const cz::rect& bounds)
+    {
         return {
             {bounds.min_point.x, bounds.min_point.y},
             {bounds.max_point.x, bounds.min_point.y},
@@ -285,26 +302,16 @@ namespace {
         };
     }
 
-    bool is_valid_bounds(const cz::rect& bounds)  {
+    bool is_valid_bounds(const cz::rect& bounds)
+    {
         return bounds.min_point.x < bounds.max_point.x &&
             bounds.min_point.y < bounds.max_point.y;
     }
 
-    bool has_duplicate_site( std::span<const cz::point> sites,
-            size_t site_index, double epsilon)  {
-
-        for (size_t i = 0; i < site_index; ++i) {
-            if (nearly_equal(sites[i], sites[site_index], epsilon)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     std::vector<std::vector<size_t>> build_neighbor_lists(
-            std::span<const cz::point> sites, double coordinate_scale) {
-
+        std::span<const cz::point> sites,
+        double coordinate_scale)
+    {
         std::vector<std::vector<size_t>> neighbors(sites.size());
 
         if (sites.empty()) {
@@ -341,7 +348,8 @@ namespace {
                     if (adjacent_cell != nullptr) {
                         const size_t neighbor_index = adjacent_cell->source_index();
 
-                        if (neighbor_index < sites.size() && neighbor_index != source_index) {
+                        if (neighbor_index < sites.size() &&
+                            neighbor_index != source_index) {
                             neighbors[source_index].push_back(neighbor_index);
                         }
                     }
@@ -362,13 +370,13 @@ namespace {
     }
 
     cz::polygon construct_cell_polygon(
-            std::span<const cz::point> sites, size_t site_index,
-            const std::vector<size_t>& neighbors, const cz::rect& bounds, double epsilon) {
+        std::span<const cz::point> sites,
+        size_t site_index,
+        const std::vector<size_t>& neighbors,
+        const cz::rect& bounds,
+        double epsilon)
+    {
         if (site_index >= sites.size()) {
-            return {};
-        }
-
-        if (has_duplicate_site(sites, site_index, epsilon)) {
             return {};
         }
 
@@ -392,12 +400,6 @@ namespace {
             if (cell.empty()) {
                 return {};
             }
-
-            normalize_polygon(cell, epsilon);
-
-            if (cell.empty()) {
-                return {};
-            }
         }
 
         normalize_polygon(cell, epsilon);
@@ -406,9 +408,10 @@ namespace {
 
 } // namespace
 
-cz::voronoi_diagram cz::construct_voronoi_diagram(  std::span<const cz::point> sites,
-        const cz::rect& bounds) {
-
+cz::voronoi_diagram cz::construct_voronoi_diagram(
+    std::span<const cz::point> sites,
+    const cz::rect& bounds)
+{
     if (sites.empty()) {
         return {};
     }
@@ -423,12 +426,13 @@ cz::voronoi_diagram cz::construct_voronoi_diagram(  std::span<const cz::point> s
         build_neighbor_lists(sites, k_coordinate_scale);
 
     for (size_t i = 0; i < sites.size(); ++i) {
-
         result[i].site = sites[i];
         result[i].neighbors = neighbors[i];
+
         if (neighbors[i].empty()) {
             continue;
         }
+
         result[i].cell = construct_cell_polygon(
             sites,
             i,
@@ -441,18 +445,23 @@ cz::voronoi_diagram cz::construct_voronoi_diagram(  std::span<const cz::point> s
     return result;
 }
 
-std::vector<cz::polygon> cz::to_voronoi_polygons(std::span<const point> sites, const rect& bounds) {
-    return construct_voronoi_diagram(sites, bounds) | rv::transform(
-            [](const auto& cell)->polygon {
-                return cell.cell;
-            }
-        ) | r::to<std::vector>();
+std::vector<cz::polygon> cz::to_voronoi_polygons(
+    std::span<const point> sites,
+    const rect& bounds)
+{
+    return construct_voronoi_diagram(sites, bounds) |
+        rv::transform([](const auto& cell) -> polygon {
+        return cell.cell;
+            }) |
+        r::to<std::vector>();
 }
 
 std::vector<cz::point> cz::perform_lloyd_relaxation(
-        std::span<const point> sites, const rect& bounds,
-        double min_delta, int max_iterations ) {
-
+    std::span<const point> sites,
+    const rect& bounds,
+    double min_delta,
+    int max_iterations)
+{
     if (sites.empty()) {
         return {};
     }
@@ -464,27 +473,25 @@ std::vector<cz::point> cz::perform_lloyd_relaxation(
     while (iter++ < max_iterations && max_delta > min_delta) {
         auto voronoi = construct_voronoi_diagram(points, bounds);
 
-        auto centroids = voronoi | rv::transform(
-                [](const auto& c) -> point {
-                    if (c.cell.empty()) {
-                        return c.site;
-                    }
-                    return centroid(c.cell);
-                }
-            ) | r::to<std::vector>();
+        auto centroids = voronoi |
+            rv::transform([](const auto& c) -> point {
+            if (c.cell.empty()) {
+                return c.site;
+            }
+            return centroid(c.cell);
+                }) |
+            r::to<std::vector>();
 
-        max_delta = r::max(
-            rv::zip(centroids, points) | rv::transform(
-                [](const auto& pair) -> double {
-                    const auto& [lhs, rhs] = pair;
-                    return distance(lhs, rhs);
-                }
-            )
-        );
+                max_delta = r::max(
+                    rv::zip(centroids, points) |
+                    rv::transform([](const auto& pair) -> double {
+                        const auto& [lhs, rhs] = pair;
+                        return distance(lhs, rhs);
+                        })
+                );
 
-        points = std::move(centroids);
+                points = std::move(centroids);
     }
 
     return points;
 }
-

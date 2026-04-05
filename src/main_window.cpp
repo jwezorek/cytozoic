@@ -33,7 +33,7 @@ void cz::main_window::showEvent(QShowEvent* event) {
 
     initialized = true;
 
-    auto seeds = cz::random_points(1000, 1.0, 1.0);
+    auto seeds = cz::random_points(5000, 1.0, 1.0);
     auto unrelaxed = cz::construct_voronoi_diagram(
         seeds,
         { {0,0},{1.0,1.0} }
