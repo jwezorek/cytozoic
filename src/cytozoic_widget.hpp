@@ -3,6 +3,7 @@
 #include <QImage>
 #include <QPoint>
 #include <QSize>
+#include <QTimer>
 #include <QWidget>
 #include "types.hpp"
 
@@ -12,8 +13,11 @@ namespace cz {
         Q_OBJECT
 
     public:
-        explicit cytozoic_widget(QWidget* parent = nullptr,
-            double log_wd = 1.0, double log_hgt = 1.0);
+        explicit cytozoic_widget(
+            QWidget* parent = nullptr,
+            int animation_duration_ms = 400,
+            int animation_frame_interval_ms = 16
+        );
 
         QSize minimumSizeHint() const override;
         QSize sizeHint() const override;
@@ -27,6 +31,11 @@ namespace cz {
         bool show_cell_nuclei() const;
         void set_show_cell_nuceli(bool show);
 
+        void start_transition(
+            const cyto_frame& from,
+            const cyto_frame& to
+        );
+
     protected:
         void paintEvent(QPaintEvent* event) override;
         void resizeEvent(QResizeEvent* event) override;
@@ -35,9 +44,13 @@ namespace cz {
         void ensure_framebuffer_matches_widget_size();
 
         QImage framebuffer_;
-        double logical_wd_;
-        double logical_hgt_;
+        int animation_duration_ms_;
+        int animation_frame_interval_ms_;
+        int animation_elapsed_ms_;
+        cyto_frame anim_start_;
+        cyto_frame anim_end_;
         bool show_cell_nuclei_;
+        QTimer animation_timer_;
     };
 
 }

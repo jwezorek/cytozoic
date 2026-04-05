@@ -441,6 +441,14 @@ cz::voronoi_diagram cz::construct_voronoi_diagram(  std::span<const cz::point> s
     return result;
 }
 
+std::vector<cz::polygon> cz::to_voronoi_polygons(std::span<const point> sites, const rect& bounds) {
+    return construct_voronoi_diagram(sites, bounds) | rv::transform(
+            [](const auto& cell)->polygon {
+                return cell.cell;
+            }
+        ) | r::to<std::vector>();
+}
+
 std::vector<cz::point> cz::perform_lloyd_relaxation(
         std::span<const point> sites, const rect& bounds,
         double min_delta, int max_iterations ) {
