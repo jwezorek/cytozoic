@@ -52,6 +52,7 @@ std::vector<cz::point> cz::random_points(
     return points;
 }
 
+/*
 cz::cyto_frame cz::to_cyto_frame(const cyto_state& state, const color_table& colors) {
     return rv::zip(state.cells, state.states) |
         rv::transform(
@@ -65,27 +66,30 @@ cz::cyto_frame cz::to_cyto_frame(const cyto_state& state, const color_table& col
             }
         ) | r::to<cyto_frame>();
 }
+*/
 
 cz::cyto_frame cz::to_cyto_frame(
         std::span<const point> pts, std::span<const polygon> polys, std::span<const color> colors) {
 
     return rv::zip(polys, colors, pts) | rv::transform(
-            [](const auto& v)->cell {
+            [](const auto& v)->frame_cell {
                 return {
                     .shape = std::get<0>(v),
                     .color = std::get<1>(v),
-                    .seed = std::get<2>(v)
+                    .site = std::get<2>(v)
                 };
             }
         ) | r::to<std::vector>();
 }
 
+/*
 cz::cyto_state cz::blank_state(const voronoi_diagram& v) {
     return {
         .cells = v,
         .states = std::vector<int8_t>(v.size(), int8_t{0})
     };
 }
+*/
 
 cz::point cz::centroid(std::span<const point> pts) {
     if (pts.empty()) {

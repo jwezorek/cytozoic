@@ -61,8 +61,8 @@ cz::cytozoic_widget::cytozoic_widget(QWidget* parent, int duration_ms, int inter
 
         for (size_t i = 0; i < anim_start_.size(); ++i) {
             sites.push_back(interpolate_point(
-                anim_start_[i].seed,
-                anim_end_[i].seed,
+                anim_start_[i].site,
+                anim_end_[i].site,
                 t
             ));
 
@@ -80,7 +80,7 @@ cz::cytozoic_widget::cytozoic_widget(QWidget* parent, int duration_ms, int inter
 
         if (animation_elapsed_ms_ >= animation_duration_ms_) {
             animation_timer_.stop();
-            set(anim_end_);
+            set(anim_end_); // we is this messed up?
         }
         });
 
@@ -170,7 +170,7 @@ void cz::cytozoic_widget::set(const cyto_frame& v) {
         constexpr double nucleus_radius = 3.0;
 
         for (const auto& c : v) {
-            const QPointF center = to_pixel(c.seed);
+            const QPointF center = to_pixel(c.site);
             painter.drawEllipse(center, nucleus_radius, nucleus_radius);
         }
     }
@@ -224,7 +224,7 @@ void cz::cytozoic_widget::start_transition(const cyto_frame& from, const cyto_fr
     }
 
     if (animation_duration_ms_ <= 0 || animation_frame_interval_ms_ <= 0) {
-        set(anim_end_);
+        //set(anim_end_);
         return;
     }
 

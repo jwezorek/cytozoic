@@ -12,13 +12,13 @@ namespace cz {
         std::optional<uint64_t> seed = {}
     );
 
-    cyto_frame to_cyto_frame(const cyto_state& state, const color_table& colors);
     cyto_frame to_cyto_frame(
         std::span<const point> sites,
         std::span<const polygon> polys,
         std::span<const color> colors
     );
-    cyto_state blank_state(const voronoi_diagram& v);
+
+    //cyto_state blank_state(const voronoi_diagram& v);
     point centroid(std::span<const point> pts);
     double dot(const point& u, const point& v);
     double distance(const point& u, const point& v);

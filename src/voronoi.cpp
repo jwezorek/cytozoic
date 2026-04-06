@@ -422,7 +422,7 @@ cz::voronoi_diagram cz::construct_voronoi_diagram(
         return {};
     }
 
-    std::vector<voronoi_cell> result(sites.size());
+    std::vector<voronoi_region> result(sites.size());
 
     const std::vector<std::vector<size_t>> neighbors =
         build_neighbor_lists(sites, k_coordinate_scale);
@@ -442,7 +442,7 @@ cz::voronoi_diagram cz::construct_voronoi_diagram(
                 return;
             }
 
-            result[i].cell = construct_cell_polygon(
+            result[i].region = construct_cell_polygon(
                 sites,
                 i,
                 neighbors[i],
@@ -460,7 +460,7 @@ std::vector<cz::polygon> cz::to_voronoi_polygons(
 {
     return construct_voronoi_diagram(sites, bounds) |
         rv::transform([](const auto& cell) -> polygon {
-        return cell.cell;
+        return cell.region;
             }) |
         r::to<std::vector>();
 }
@@ -484,10 +484,10 @@ std::vector<cz::point> cz::perform_lloyd_relaxation(
 
         auto centroids = voronoi |
             rv::transform([](const auto& c) -> point {
-            if (c.cell.empty()) {
+            if (c.region.empty()) {
                 return c.site;
             }
-            return centroid(c.cell);
+            return centroid(c.region);
                 }) |
             r::to<std::vector>();
 
