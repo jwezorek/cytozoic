@@ -14,14 +14,6 @@ namespace cz {
         point max_point;
     };
 
-    struct voronoi_region {
-        point site;
-        polygon region;
-        std::vector<size_t> neighbors;
-    };
-
-    using voronoi_diagram = std::vector<voronoi_region>;
-
     struct color {
         uint8_t r;
         uint8_t g;

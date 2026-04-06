@@ -6,7 +6,7 @@
 
 namespace cz {
 
-    voronoi_diagram construct_voronoi_diagram(
+    std::vector<std::vector<size_t>> to_voronoi_topology(
         std::span<const point> sites, const rect& bounds
     );
 

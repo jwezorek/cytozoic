@@ -411,9 +411,9 @@ namespace {
 
 } // namespace
 
-cz::voronoi_diagram cz::construct_voronoi_diagram( 
-        std::span<const cz::point> sites, const cz::rect& bounds) 
-{
+std::vector<std::vector<size_t>> cz::to_voronoi_topology(
+        std::span<const cz::point> sites, const cz::rect& bounds) {
+
     if (sites.empty()) {
         return {};
     }
@@ -422,11 +422,21 @@ cz::voronoi_diagram cz::construct_voronoi_diagram(
         return {};
     }
 
-    std::vector<voronoi_region> result(sites.size());
-
     const std::vector<std::vector<size_t>> neighbors =
         build_neighbor_lists(sites, k_coordinate_scale);
 
+    return neighbors;
+}
+
+std::vector<cz::polygon> cz::to_voronoi_polygons(
+        std::span<const cz::point> sites, const cz::rect& bounds) {
+
+    auto neighbors = to_voronoi_topology(sites, bounds);
+    if (neighbors.empty()) {
+        return {};
+    }
+
+    std::vector<cz::polygon> result(sites.size());
     std::vector<size_t> indices(sites.size());
     std::iota(indices.begin(), indices.end(), size_t{ 0 });
 
@@ -435,14 +445,7 @@ cz::voronoi_diagram cz::construct_voronoi_diagram(
         indices.begin(),
         indices.end(),
         [&](size_t i) {
-            result[i].site = sites[i];
-            result[i].neighbors = neighbors[i];
-
-            if (neighbors[i].empty()) {
-                return;
-            }
-
-            result[i].region = construct_cell_polygon(
+            result[i] = construct_cell_polygon(
                 sites,
                 i,
                 neighbors[i],
@@ -452,17 +455,6 @@ cz::voronoi_diagram cz::construct_voronoi_diagram(
         });
 
     return result;
-}
-
-std::vector<cz::polygon> cz::to_voronoi_polygons(
-    std::span<const point> sites,
-    const rect& bounds)
-{
-    return construct_voronoi_diagram(sites, bounds) |
-        rv::transform([](const auto& cell) -> polygon {
-        return cell.region;
-            }) |
-        r::to<std::vector>();
 }
 
 std::vector<cz::point> cz::perform_lloyd_relaxation(
@@ -480,26 +472,27 @@ std::vector<cz::point> cz::perform_lloyd_relaxation(
     auto points = sites | r::to<std::vector>();
 
     while (iter++ < max_iterations && max_delta > min_delta) {
-        auto voronoi = construct_voronoi_diagram(points, bounds);
+        auto polygons = to_voronoi_polygons(points, bounds);
 
-        auto centroids = voronoi |
-            rv::transform([](const auto& c) -> point {
-            if (c.region.empty()) {
-                return c.site;
-            }
-            return centroid(c.region);
-                }) |
-            r::to<std::vector>();
+        auto centroids = polygons |
+            rv::transform(
+                [](const auto& p) -> point {
+                    if (p.empty()) {
+                        throw std::runtime_error("empty polyogn");
+                    }
+                    return centroid(p);
+                }
+            ) |  r::to<std::vector>();
 
-                max_delta = r::max(
-                    rv::zip(centroids, points) |
-                    rv::transform([](const auto& pair) -> double {
-                        const auto& [lhs, rhs] = pair;
-                        return distance(lhs, rhs);
-                        })
-                );
+            max_delta = r::max(
+                rv::zip(centroids, points) |
+                rv::transform([](const auto& pair) -> double {
+                    const auto& [lhs, rhs] = pair;
+                    return distance(lhs, rhs);
+                    })
+            );
 
-                points = std::move(centroids);
+         points = std::move(centroids);
     }
 
     return points;
