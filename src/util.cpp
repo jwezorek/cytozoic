@@ -1,4 +1,5 @@
 #include "util.hpp"
+#include "voronoi.hpp"
 #include <random>
 #include <ranges>
 
@@ -52,25 +53,10 @@ std::vector<cz::point> cz::random_points(
     return points;
 }
 
-/*
-cz::cyto_frame cz::to_cyto_frame(const cyto_state& state, const color_table& colors) {
-    return rv::zip(state.cells, state.states) |
-        rv::transform(
-            [&](auto&& cell_state)->cell {
-                const auto& [vor_cell, s] = cell_state;
-                return {
-                    .shape = vor_cell.cell,
-                    .color = colors[s],
-                    .seed = vor_cell.site
-                };
-            }
-        ) | r::to<cyto_frame>();
-}
-*/
-
 cz::cyto_frame cz::to_cyto_frame(
-        std::span<const point> pts, std::span<const polygon> polys, std::span<const color> colors) {
+        std::span<const point> pts, std::span<const color> colors) {
 
+    auto polys = to_voronoi_polygons(pts);
     return rv::zip(polys, colors, pts) | rv::transform(
             [](const auto& v)->frame_cell {
                 return {
@@ -81,15 +67,6 @@ cz::cyto_frame cz::to_cyto_frame(
             }
         ) | r::to<std::vector>();
 }
-
-/*
-cz::cyto_state cz::blank_state(const voronoi_diagram& v) {
-    return {
-        .cells = v,
-        .states = std::vector<int8_t>(v.size(), int8_t{0})
-    };
-}
-*/
 
 cz::point cz::centroid(std::span<const point> pts) {
     if (pts.empty()) {

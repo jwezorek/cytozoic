@@ -14,7 +14,6 @@ namespace cz {
 
     cyto_frame to_cyto_frame(
         std::span<const point> sites,
-        std::span<const polygon> polys,
         std::span<const color> colors
     );
 

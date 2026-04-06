@@ -38,18 +38,14 @@ void cz::main_window::showEvent(QShowEvent* event) {
     initialized = true;
 
     auto seeds = cz::random_points(500, 1.0, 1.0);
-    auto unrelaxed = cz::to_voronoi_polygons( seeds );
-
-    auto relaxed_seeds = perform_lloyd_relaxation(seeds, 0.001, 20);
-    auto relaxed = cz::to_voronoi_polygons( relaxed_seeds );
-
-    auto from = to_cyto_frame(seeds, unrelaxed,
-        std::vector<color>{unrelaxed.size(), color{ 255,128,55 }}
+    auto from = to_cyto_frame(seeds,
+        std::vector<color>{seeds.size(), color{ 255,128,55 }}
     );
 
+    auto relaxed_seeds = perform_lloyd_relaxation(seeds, 0.001, 20);
     auto to = to_cyto_frame(
-        relaxed_seeds, relaxed,
-        std::vector<color>{relaxed.size(), color{ 55,128,255 }}
+        relaxed_seeds,
+        std::vector<color>{relaxed_seeds.size(), color{ 55,128,255 }}
     );
 
     canvas_->set_show_cell_nuceli(true);

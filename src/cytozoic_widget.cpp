@@ -73,8 +73,7 @@ cz::cytozoic_widget::cytozoic_widget(QWidget* parent, int duration_ms, int inter
             ));
         }
 
-        auto polys = cz::to_voronoi_polygons(sites);
-        auto frame = cz::to_cyto_frame(sites, polys, colors);
+        auto frame = cz::to_cyto_frame(sites, colors);
         set(frame);
 
         if (animation_elapsed_ms_ >= animation_duration_ms_) {
