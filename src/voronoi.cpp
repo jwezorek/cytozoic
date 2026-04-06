@@ -1,5 +1,4 @@
 #include "voronoi.hpp"
-#include "util.hpp"
 
 #ifdef _MSC_VER
 #pragma warning(push)

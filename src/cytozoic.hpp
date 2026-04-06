@@ -1,18 +1,8 @@
 #pragma once
 
-#include <cstdint>
-#include <vector>
-#include "vec2.hpp"
+#include "geometry.hpp"
 
 namespace cz {
-
-    using point = vec2<double>;
-    using polygon = std::vector<point>;
-
-    struct rect {
-        point min_point;
-        point max_point;
-    };
 
     struct color {
         uint8_t r;
@@ -39,5 +29,12 @@ namespace cz {
     };
 
     using cyto_state = std::vector<cell_state>;
+
+    cyto_frame to_cyto_frame(
+        std::span<const point> sites,
+        std::span<const color> colors
+    );
+
+    color interpolate_color(const color& from, const color& to, double t);
 
 }

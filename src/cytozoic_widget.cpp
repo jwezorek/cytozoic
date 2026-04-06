@@ -1,6 +1,5 @@
 #include "cytozoic_widget.hpp"
 #include "voronoi.hpp"
-#include "util.hpp"
 
 #include <QColor>
 #include <QPaintEvent>

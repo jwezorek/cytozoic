@@ -1,6 +1,5 @@
 #include "main_window.hpp"
 #include "cytozoic_widget.hpp"
-#include "util.hpp"
 #include "voronoi.hpp"
 #include <QMenuBar>
 #include <QMenu>

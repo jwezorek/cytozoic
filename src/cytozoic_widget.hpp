@@ -5,7 +5,7 @@
 #include <QSize>
 #include <QTimer>
 #include <QWidget>
-#include "types.hpp"
+#include "cytozoic.hpp"
 
 namespace cz {
 

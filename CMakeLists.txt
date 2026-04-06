@@ -21,7 +21,8 @@ add_executable(cytozoic
     src/main_window.cpp
     src/cytozoic_widget.cpp
     src/voronoi.cpp 
-    src/util.cpp
+    src/geometry.cpp
+    src/cytozoic.cpp
 )
 
 target_link_libraries(
