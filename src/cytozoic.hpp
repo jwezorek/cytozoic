@@ -17,6 +17,7 @@ namespace cz {
     using cell_id = uint64_t;
 
     struct frame_cell {
+        cell_id id;
         polygon shape;
         color color;
         point site;
@@ -32,10 +33,21 @@ namespace cz {
 
     using cyto_state = std::vector<cell_state>;
 
-    cyto_frame to_cyto_frame(
-        std::span<const point> sites,
-        std::span<const color> colors
-    );
+    class cell_id_source {
+    public:
+        cell_id_source();
+        cell_id acquire();
+        void release(cell_id id);
+        void reset();
+
+    private:
+        cell_id next_id_;
+        std::vector<cell_id> free_ids_;
+    };
+
+    cyto_state random_cyto_state(int num_cells, int num_states, cell_id_source& ids);
+
+    cyto_frame to_cyto_frame(const cyto_state& state, const color_table& palette);
 
     cz::cyto_frame interpolate_cyto_frames(
         std::span<const cz::frame_cell> from,

@@ -1,16 +1,69 @@
 #include "main_window.hpp"
 #include "cytozoic_widget.hpp"
 #include "voronoi.hpp"
-#include <QMenuBar>
+
+#include <QEvent>
+#include <QKeyEvent>
 #include <QMenu>
+#include <QMenuBar>
 #include <ranges>
+#include <unordered_map>
+#include <utility>
 
 namespace r = std::ranges;
 namespace rv = std::ranges::views;
 
 namespace {
 
-}
+    struct pending_animation {
+        bool initialized = false;
+        bool started = false;
+        cz::cyto_frame from;
+        cz::cyto_frame to;
+    };
+
+    std::unordered_map<cz::main_window*, pending_animation> g_pending_animations;
+
+    class key_start_filter : public QObject {
+    public:
+        explicit key_start_filter(cz::main_window* window)
+            : QObject(window),
+            window_(window) {}
+
+    protected:
+        bool eventFilter(QObject* watched, QEvent* event) override {
+            Q_UNUSED(watched);
+
+            if (event->type() != QEvent::KeyPress) {
+                return QObject::eventFilter(watched, event);
+            }
+
+            auto it = g_pending_animations.find(window_);
+            if (it == g_pending_animations.end()) {
+                return QObject::eventFilter(watched, event);
+            }
+
+            pending_animation& anim = it->second;
+            if (!anim.initialized || anim.started) {
+                return QObject::eventFilter(watched, event);
+            }
+
+            anim.started = true;
+            window_->centralWidget()->removeEventFilter(this);
+
+            auto* canvas = qobject_cast<cz::cytozoic_widget*>(window_->centralWidget());
+            if (canvas != nullptr) {
+                canvas->start_transition(anim.from, anim.to);
+            }
+
+            return true;
+        }
+
+    private:
+        cz::main_window* window_;
+    };
+
+} // namespace
 
 cz::main_window::main_window(QWidget* parent)
     : QMainWindow(parent)
@@ -18,63 +71,50 @@ cz::main_window::main_window(QWidget* parent)
     setCentralWidget(canvas_ = new cytozoic_widget(this));
     create_menus();
     setWindowTitle(tr("cytozoic"));
-    resize(1200, 1200);
+    resize(800, 800);
 
+    setFocusPolicy(Qt::StrongFocus);
+    centralWidget()->setFocusPolicy(Qt::StrongFocus);
+    centralWidget()->installEventFilter(new key_start_filter(this));
 }
 
 cz::main_window::~main_window()
 {
+    g_pending_animations.erase(this);
 }
 
 void cz::main_window::showEvent(QShowEvent* event) {
-    static bool initialized = false;
     QMainWindow::showEvent(event);
 
-    if (initialized) {
+    pending_animation& anim = g_pending_animations[this];
+    if (anim.initialized) {
         return;
     }
 
-    initialized = true;
+    anim.initialized = true;
 
-    auto seeds = cz::random_points(500, 1.0, 1.0);
-    auto from = to_cyto_frame(seeds,
-        std::vector<color>{seeds.size(), color{ 255,128,55 }}
-    );
+    cz::cell_id_source ids;
+    auto from_state = random_cyto_state(1000, 4, ids);
+    ids.reset();
+    auto to_state = random_cyto_state(1000, 4, ids);
 
-    auto relaxed_seeds = perform_lloyd_relaxation(seeds, 0.001, 20);
-    auto to = to_cyto_frame(
-        relaxed_seeds,
-        std::vector<color>{relaxed_seeds.size(), color{ 55,128,255 }}
-    );
+    cz::color_table palette = {
+        {0, 0, 0},
+        {255, 0, 0},
+        {255, 255, 130},
+        {0, 60, 200}
+    };
 
-    canvas_->set_show_cell_nuceli(true);
-    canvas_->start_transition(from, to);
+    canvas_->set_show_cell_nuceli(false);
+
+    anim.from = to_cyto_frame(from_state, palette);
+    anim.to = to_cyto_frame(to_state, palette);
+
+    canvas_->set(anim.from);
+    centralWidget()->setFocus();
 }
 
 void cz::main_window::create_menus() {
     QMenu* file_menu = menuBar()->addMenu(tr("&File"));
-	/*
-    QAction* open_act = new QAction(tr("&Open..."), this);
-    open_act->setShortcut(QKeySequence::Open);
-    connect(open_act, &QAction::triggered, this, &main_window::open_file);
-    file_menu->addAction(open_act);
-
-    file_menu->addSeparator();
-
-    QAction* exit_act = new QAction(tr("E&xit"), this);
-    exit_act->setShortcut(QKeySequence::Quit);
-    connect(exit_act, &QAction::triggered, this, &QWidget::close);
-    file_menu->addAction(exit_act);
-
-    // Optional: View menu to toggle docks
-    QMenu* view_menu = menuBar()->addMenu(tr("&View"));
-    view_menu->addAction(tr("Toggle Source Palette"), [this](bool) {
-        if (auto* dw = findChild<QDockWidget*>("Source Dock"))
-            dw->setVisible(!dw->isVisible());
-        });
-    view_menu->addAction(tr("Toggle Target Palette"), [this](bool) {
-        if (auto* dw = findChild<QDockWidget*>("Target Dock"))
-            dw->setVisible(!dw->isVisible());
-        });
-	*/
+    Q_UNUSED(file_menu);
 }
