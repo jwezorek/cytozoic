@@ -2,6 +2,8 @@
 
 #include "geometry.hpp"
 
+/*------------------------------------------------------------------------------------------------*/
+
 namespace cz {
 
     struct color {
@@ -35,6 +37,10 @@ namespace cz {
         std::span<const color> colors
     );
 
-    color interpolate_color(const color& from, const color& to, double t);
+    cz::cyto_frame interpolate_cyto_frames(
+        std::span<const cz::frame_cell> from,
+        std::span<const cz::frame_cell> to,
+        double t
+    );
 
 }

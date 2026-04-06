@@ -42,6 +42,7 @@ namespace cz {
 
     private:
         void ensure_framebuffer_matches_widget_size();
+        void advance_animation();
 
         QImage framebuffer_;
         int animation_duration_ms_;

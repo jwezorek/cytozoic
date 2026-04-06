@@ -17,13 +17,19 @@ namespace rv = std::ranges::views;
 
 /*------------------------------------------------------------------------------------------------*/
 
+namespace {
+
+
+
+} // namespace
+
 cz::cytozoic_widget::cytozoic_widget(QWidget* parent, int duration_ms, int interval_ms) :
     QWidget(parent),
     animation_duration_ms_(duration_ms),
     animation_frame_interval_ms_(interval_ms),
     animation_elapsed_ms_(0),
-    show_cell_nuclei_(false) {
-
+    show_cell_nuclei_(false)
+{
     setAttribute(Qt::WA_OpaquePaintEvent);
     setAttribute(Qt::WA_NoSystemBackground);
     setAutoFillBackground(false);
@@ -31,55 +37,7 @@ cz::cytozoic_widget::cytozoic_widget(QWidget* parent, int duration_ms, int inter
     animation_timer_.setSingleShot(false);
     animation_timer_.setInterval(animation_frame_interval_ms_);
 
-    connect(&animation_timer_, &QTimer::timeout, this, [this]() {
-        if (anim_start_.size() != anim_end_.size() || anim_start_.empty()) {
-            animation_timer_.stop();
-            if (!anim_end_.empty()) {
-                set(anim_end_);
-            }
-            return;
-        }
-
-        animation_elapsed_ms_ = std::min(
-            animation_elapsed_ms_ + animation_frame_interval_ms_,
-            animation_duration_ms_
-        );
-
-        double t = 1.0;
-        if (animation_duration_ms_ > 0) {
-            t = static_cast<double>(animation_elapsed_ms_) /
-                static_cast<double>(animation_duration_ms_);
-        }
-
-        t = std::clamp(t, 0.0, 1.0);
-
-        std::vector<point> sites;
-        std::vector<color> colors;
-        sites.reserve(anim_start_.size());
-        colors.reserve(anim_start_.size());
-
-        for (size_t i = 0; i < anim_start_.size(); ++i) {
-            sites.push_back(interpolate_point(
-                anim_start_[i].site,
-                anim_end_[i].site,
-                t
-            ));
-
-            colors.push_back(interpolate_color(
-                anim_start_[i].color,
-                anim_end_[i].color,
-                t
-            ));
-        }
-
-        auto frame = cz::to_cyto_frame(sites, colors);
-        set(frame);
-
-        if (animation_elapsed_ms_ >= animation_duration_ms_) {
-            animation_timer_.stop();
-            set(anim_end_); // we is this messed up?
-        }
-        });
+    connect(&animation_timer_, &QTimer::timeout, this, &cytozoic_widget::advance_animation);
 
     ensure_framebuffer_matches_widget_size();
     clear(Qt::black);
@@ -221,7 +179,7 @@ void cz::cytozoic_widget::start_transition(const cyto_frame& from, const cyto_fr
     }
 
     if (animation_duration_ms_ <= 0 || animation_frame_interval_ms_ <= 0) {
-        //set(anim_end_);
+        set(anim_end_);
         return;
     }
 
@@ -229,6 +187,39 @@ void cz::cytozoic_widget::start_transition(const cyto_frame& from, const cyto_fr
 
     set(anim_start_);
     animation_timer_.start();
+}
+
+void cz::cytozoic_widget::advance_animation() {
+    if (anim_start_.size() != anim_end_.size() || anim_start_.empty()) {
+        animation_timer_.stop();
+
+        if (!anim_end_.empty()) {
+            set(anim_end_);
+        }
+
+        return;
+    }
+
+    animation_elapsed_ms_ = std::min(
+        animation_elapsed_ms_ + animation_frame_interval_ms_,
+        animation_duration_ms_
+    );
+
+    double t = 1.0;
+    if (animation_duration_ms_ > 0) {
+        t = static_cast<double>(animation_elapsed_ms_) /
+            static_cast<double>(animation_duration_ms_);
+    }
+
+    auto frame = interpolate_cyto_frames(anim_start_, anim_end_, t);
+    if (!frame.empty()) {
+        set(frame);
+    }
+
+    if (animation_elapsed_ms_ >= animation_duration_ms_) {
+        animation_timer_.stop();
+        set(anim_end_);
+    }
 }
 
 void cz::cytozoic_widget::ensure_framebuffer_matches_widget_size() {
