@@ -458,11 +458,8 @@ std::vector<cz::polygon> cz::to_voronoi_polygons(
 }
 
 std::vector<cz::point> cz::perform_lloyd_relaxation(
-    std::span<const point> sites,
-    const rect& bounds,
-    double min_delta,
-    int max_iterations)
-{
+        std::span<const point> sites, double min_delta,
+        int max_iterations, const rect& bounds ) {
     if (sites.empty()) {
         return {};
     }

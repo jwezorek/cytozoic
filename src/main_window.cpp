@@ -38,10 +38,10 @@ void cz::main_window::showEvent(QShowEvent* event) {
     initialized = true;
 
     auto seeds = cz::random_points(500, 1.0, 1.0);
-    auto unrelaxed = cz::to_voronoi_polygons( seeds, { {0,0},{1.0,1.0} } );
+    auto unrelaxed = cz::to_voronoi_polygons( seeds );
 
-    auto relaxed_seeds = perform_lloyd_relaxation(seeds, { {0,0},{1.0,1.0} }, 0.001, 20);
-    auto relaxed = cz::to_voronoi_polygons( relaxed_seeds, { {0,0},{1.0,1.0} } );
+    auto relaxed_seeds = perform_lloyd_relaxation(seeds, 0.001, 20);
+    auto relaxed = cz::to_voronoi_polygons( relaxed_seeds );
 
     auto from = to_cyto_frame(seeds, unrelaxed,
         std::vector<color>{unrelaxed.size(), color{ 255,128,55 }}

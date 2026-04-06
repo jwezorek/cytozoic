@@ -73,8 +73,7 @@ cz::cytozoic_widget::cytozoic_widget(QWidget* parent, int duration_ms, int inter
             ));
         }
 
-        const cz::rect bounds{ {0.0, 0.0}, {1.0, 1.0} };
-        auto polys = cz::to_voronoi_polygons(sites, bounds);
+        auto polys = cz::to_voronoi_polygons(sites);
         auto frame = cz::to_cyto_frame(sites, polys, colors);
         set(frame);
 
