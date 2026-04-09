@@ -23,6 +23,8 @@
 #include <span>
 #include <vector>
 
+#include <qdebug.h>
+
 namespace bp = boost::polygon;
 namespace r = std::ranges;
 namespace rv = std::ranges::views;
@@ -428,10 +430,9 @@ std::vector<std::vector<size_t>> cz::to_voronoi_topology(
 }
 
 std::vector<cz::polygon> cz::to_voronoi_polygons(
-        std::span<const cz::point> sites, const cz::rect& bounds) {
-
-    auto neighbors = to_voronoi_topology(sites, bounds);
-    if (neighbors.empty()) {
+        std::span<const point> sites, const std::vector<std::vector<size_t>>& graph, 
+        const rect& bounds) {
+    if (graph.empty()) {
         return {};
     }
 
@@ -447,13 +448,20 @@ std::vector<cz::polygon> cz::to_voronoi_polygons(
             result[i] = construct_cell_polygon(
                 sites,
                 i,
-                neighbors[i],
+                graph[i],
                 bounds,
                 k_clip_epsilon
             );
         });
 
     return result;
+}
+
+std::vector<cz::polygon> cz::to_voronoi_polygons(
+        std::span<const cz::point> sites, const cz::rect& bounds) {
+
+    auto graph = to_voronoi_topology(sites, bounds);
+    return to_voronoi_polygons(sites, graph, bounds);
 }
 
 std::vector<cz::point> cz::perform_lloyd_relaxation(

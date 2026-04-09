@@ -23,6 +23,7 @@ add_executable(cytozoic
     src/voronoi.cpp 
     src/geometry.cpp
     src/cytozoic.cpp
+    src/neighborhood_indexer.cpp
 )
 
 target_link_libraries(

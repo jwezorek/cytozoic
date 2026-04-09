@@ -1,6 +1,7 @@
 #pragma once
 
 #include "geometry.hpp"
+#include "neighborhood_indexer.hpp"
 
 /*------------------------------------------------------------------------------------------------*/
 
@@ -53,6 +54,19 @@ namespace cz {
         std::span<const cz::frame_cell> from,
         std::span<const cz::frame_cell> to,
         double t
+    );
+
+    struct state_table_item {
+        int8_t new_state;
+        int8_t spawn_state;
+    };
+
+    using state_table = std::vector<std::vector<state_table_item>>;
+    
+    cyto_state apply_state_table(
+        const cyto_state& state,
+        const state_table& tbl,
+        const neighborhood_indexer& indexer
     );
 
 }

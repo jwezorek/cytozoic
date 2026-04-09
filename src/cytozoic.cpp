@@ -75,6 +75,54 @@ namespace {
         std::uniform_int_distribution<int> dist(0, num_states - 1);
         return static_cast<int8_t>(dist(rng));
     }
+
+    struct cell {
+        cz::cell_id id;
+        cz::point site;
+        int8_t state;
+        cz::polygon shape;
+        std::vector<cz::cell_id> neighbors;
+    };
+
+    using cell_graph = std::unordered_map<cz::cell_id, cell>;
+
+    cell_graph build_live_cell_graph(const cz::cyto_state& state) {
+        cell_graph graph;
+        auto live_cells = state | rv::filter(
+            [](const auto& c) {
+                // negative ids indicate dead cells...
+                return c.state >= 0;
+            }
+        ) | r::to<std::vector>();
+        auto sites = live_cells | rv::transform(
+            [](const auto& c) {
+                return c.site;
+            }
+        ) | r::to<std::vector>();
+        auto neighbors = to_voronoi_topology(sites);
+        auto polygons = to_voronoi_polygons(sites, neighbors);
+        
+        return rv::zip(live_cells, neighbors, polygons) | rv::transform(
+            [&](const auto& triple)->cell_graph::value_type {
+                const auto& [cell, adj, shape] = triple;
+                auto adj_list_as_ids = adj | rv::transform(
+                    [&](size_t adj_index)->cz::cell_id {
+                        return live_cells.at(adj_index).id;
+                    }
+                ) | r::to<std::vector>();
+                return {
+                    cell.id,
+                    ::cell{
+                        .id = cell.id,
+                        .site = cell.site,
+                        .state = cell.state,
+                        .shape = shape,
+                        .neighbors = adj_list_as_ids
+                    }
+                };
+            }
+        ) | r::to< cell_graph>();
+    }
 } 
 
 cz::cyto_state cz::random_cyto_state(int num_cells, int num_states, cell_id_source& ids) {
@@ -204,4 +252,10 @@ cz::cyto_frame cz::interpolate_cyto_frames( std::span<const cz::frame_cell> from
     }
 
     return result;
+}
+
+cz::cyto_state cz::apply_state_table(
+        const cyto_state& state, const state_table& tbl, const neighborhood_indexer& indexer) {
+    auto state_graph = build_live_cell_graph(state);
+    return {};
 }
