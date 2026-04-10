@@ -4,12 +4,18 @@ project(cytozoic VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Use Vcpkg toolchain if available
+if(DEFINED ENV{VCPKG_ROOT})
+    set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+endif()
+
+find_package(CGAL REQUIRED)
+
 find_package(Boost 1.80 REQUIRED)
 if(Boost_FOUND)
     include_directories(${Boost_INCLUDE_DIRS}) 
 endif()
 
-find_package(Eigen3 3.3 REQUIRED)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 set(CMAKE_AUTOMOC ON)
@@ -29,7 +35,7 @@ add_executable(cytozoic
 target_link_libraries(
     cytozoic PRIVATE 
     Qt6::Widgets  
-    Eigen3::Eigen
+    CGAL::CGAL
 )
 
 set_target_properties(cytozoic PROPERTIES

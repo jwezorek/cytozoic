@@ -1,67 +1,35 @@
 #include "voronoi.hpp"
 
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable: 5055)
-#endif
-
-#include <boost/polygon/voronoi.hpp>
-
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
+#include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
+#include <CGAL/Delaunay_triangulation_2.h>
+#include <CGAL/Triangulation_vertex_base_with_info_2.h>
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
-#include <cstdint>
 #include <execution>
 #include <limits>
 #include <numeric>
-#include <optional>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
-#include <qdebug.h>
-
-namespace bp = boost::polygon;
 namespace r = std::ranges;
 namespace rv = std::ranges::views;
 
-namespace cz::detail {
-
-    using int_point = vec2<std::int64_t>;
-
-} // namespace cz::detail
-
-namespace boost::polygon {
-
-    template <>
-    struct geometry_concept<cz::detail::int_point> {
-        using type = point_concept;
-    };
-
-    template <>
-    struct point_traits<cz::detail::int_point> {
-        using coordinate_type = std::int64_t;
-
-        static coordinate_type get(
-            const cz::detail::int_point& point,
-            orientation_2d orient)
-        {
-            return orient == HORIZONTAL ? point.x : point.y;
-        }
-    };
-
-} // namespace boost::polygon
-
 namespace {
 
-    constexpr double k_coordinate_scale = 1000000.0;
     constexpr double k_clip_epsilon = 1e-9;
 
-    using cz::detail::int_point;
+    using kernel = CGAL::Exact_predicates_inexact_constructions_kernel;
+    using cgal_point = kernel::Point_2;
+    using vertex_info = size_t;
+    using vertex_base = CGAL::Triangulation_vertex_base_with_info_2<vertex_info, kernel>;
+    using face_base = CGAL::Triangulation_face_base_2<kernel>;
+    using tds = CGAL::Triangulation_data_structure_2<vertex_base, face_base>;
+    using delaunay_triangulation = CGAL::Delaunay_triangulation_2<kernel, tds>;
+    using vertex_handle = delaunay_triangulation::Vertex_handle;
+    using vertex_circulator = delaunay_triangulation::Vertex_circulator;
 
     struct clip_line {
         cz::point point_on_line;
@@ -128,12 +96,14 @@ namespace {
         poly = std::move(cleaned);
     }
 
-    void remove_collinear_vertices(cz::polygon& poly, double epsilon) {
+    void remove_collinear_vertices(cz::polygon& poly, double epsilon)
+    {
         if (poly.size() < 3) {
             return;
         }
 
         bool changed = true;
+
         while (changed && poly.size() >= 3) {
             changed = false;
             cz::polygon cleaned;
@@ -162,7 +132,8 @@ namespace {
         }
     }
 
-    void normalize_polygon(cz::polygon& poly, double epsilon) {
+    void normalize_polygon(cz::polygon& poly, double epsilon)
+    {
         remove_consecutive_duplicate_vertices(poly, epsilon);
         remove_collinear_vertices(poly, epsilon);
         remove_consecutive_duplicate_vertices(poly, epsilon);
@@ -176,30 +147,13 @@ namespace {
         }
     }
 
-    std::vector<int_point> scale_points_to_integer_grid(
-        std::span<const cz::point> sites,
-        double coordinate_scale)
-    {
-        std::vector<int_point> result;
-        result.reserve(sites.size());
-
-        for (const cz::point& site : sites) {
-            result.push_back({
-                static_cast<std::int64_t>(std::llround(site.x * coordinate_scale)),
-                static_cast<std::int64_t>(std::llround(site.y * coordinate_scale))
-                });
-        }
-
-        return result;
-    }
-
     bool point_is_inside_half_plane(
         const cz::point& p,
         const clip_line& line,
         double epsilon)
     {
         const cz::point offset = p - line.point_on_line;
-        return dot(offset, line.normal) <= epsilon;
+        return cz::dot(offset, line.normal) <= epsilon;
     }
 
     std::optional<cz::point> intersect_segment_with_line(
@@ -209,13 +163,13 @@ namespace {
         double epsilon)
     {
         const cz::point segment = b - a;
-        const double denominator = dot(segment, line.normal);
+        const double denominator = cz::dot(segment, line.normal);
 
         if (std::abs(denominator) <= epsilon) {
             return std::nullopt;
         }
 
-        const double t = dot(line.point_on_line - a, line.normal) / denominator;
+        const double t = cz::dot(line.point_on_line - a, line.normal) / denominator;
         return a + t * segment;
     }
 
@@ -308,9 +262,24 @@ namespace {
             bounds.min_point.y < bounds.max_point.y;
     }
 
-    std::vector<std::vector<size_t>> build_neighbor_lists(
-        std::span<const cz::point> sites,
-        double coordinate_scale)
+    cgal_point to_cgal_point(const cz::point& p)
+    {
+        return { p.x, p.y };
+    }
+
+    delaunay_triangulation build_delaunay(std::span<const cz::point> sites)
+    {
+        delaunay_triangulation dt;
+
+        for (size_t i = 0; i < sites.size(); ++i) {
+            vertex_handle vh = dt.insert(to_cgal_point(sites[i]));
+            vh->info() = i;
+        }
+
+        return dt;
+    }
+
+    std::vector<std::vector<size_t>> build_neighbor_lists(std::span<const cz::point> sites)
     {
         std::vector<std::vector<size_t>> neighbors(sites.size());
 
@@ -318,56 +287,27 @@ namespace {
             return neighbors;
         }
 
-        for (auto& cell_neighbors : neighbors) {
-            cell_neighbors.reserve(8);
-        }
+        delaunay_triangulation dt = build_delaunay(sites);
 
-        const std::vector<int_point> integer_sites =
-            scale_points_to_integer_grid(sites, coordinate_scale);
+        for (auto vit = dt.finite_vertices_begin(); vit != dt.finite_vertices_end(); ++vit) {
+            const size_t source_index = vit->info();
+            auto& out = neighbors[source_index];
 
-        bp::voronoi_diagram<double> diagram;
-        bp::construct_voronoi(integer_sites.begin(), integer_sites.end(), &diagram);
-
-        for (const auto& cell : diagram.cells()) {
-            const size_t source_index = cell.source_index();
-
-            if (source_index >= sites.size()) {
+            vertex_circulator circ = dt.incident_vertices(vit);
+            if (circ == 0) {
                 continue;
             }
 
-            const auto* edge = cell.incident_edge();
-
-            if (edge == nullptr) {
-                continue;
-            }
-
-            const auto* start = edge;
-
+            vertex_circulator start = circ;
             do {
-                const auto* twin = edge->twin();
-
-                if (twin != nullptr) {
-                    const auto* adjacent_cell = twin->cell();
-
-                    if (adjacent_cell != nullptr) {
-                        const size_t neighbor_index = adjacent_cell->source_index();
-
-                        if (neighbor_index < sites.size() &&
-                            neighbor_index != source_index) {
-                            neighbors[source_index].push_back(neighbor_index);
-                        }
-                    }
+                if (!dt.is_infinite(circ)) {
+                    out.push_back(circ->info());
                 }
+                ++circ;
+            } while (circ != start);
 
-                edge = edge->next();
-            } while (edge != start);
-        }
-
-        for (std::vector<size_t>& cell_neighbors : neighbors) {
-            std::sort(cell_neighbors.begin(), cell_neighbors.end());
-            cell_neighbors.erase(
-                std::unique(cell_neighbors.begin(), cell_neighbors.end()),
-                cell_neighbors.end());
+            std::sort(out.begin(), out.end());
+            out.erase(std::unique(out.begin(), out.end()), out.end());
         }
 
         return neighbors;
@@ -413,8 +353,9 @@ namespace {
 } // namespace
 
 std::vector<std::vector<size_t>> cz::to_voronoi_topology(
-        std::span<const cz::point> sites, const cz::rect& bounds) {
-
+    std::span<const cz::point> sites,
+    const cz::rect& bounds)
+{
     if (sites.empty()) {
         return {};
     }
@@ -423,15 +364,14 @@ std::vector<std::vector<size_t>> cz::to_voronoi_topology(
         return {};
     }
 
-    const std::vector<std::vector<size_t>> neighbors =
-        build_neighbor_lists(sites, k_coordinate_scale);
-
-    return neighbors;
+    return build_neighbor_lists(sites);
 }
 
 std::vector<cz::polygon> cz::to_voronoi_polygons(
-        std::span<const point> sites, const std::vector<std::vector<size_t>>& graph, 
-        const rect& bounds) {
+    std::span<const point> sites,
+    const std::vector<std::vector<size_t>>& graph,
+    const rect& bounds)
+{
     if (graph.empty()) {
         return {};
     }
@@ -458,15 +398,19 @@ std::vector<cz::polygon> cz::to_voronoi_polygons(
 }
 
 std::vector<cz::polygon> cz::to_voronoi_polygons(
-        std::span<const cz::point> sites, const cz::rect& bounds) {
-
+    std::span<const cz::point> sites,
+    const cz::rect& bounds)
+{
     auto graph = to_voronoi_topology(sites, bounds);
     return to_voronoi_polygons(sites, graph, bounds);
 }
 
 std::vector<cz::point> cz::perform_lloyd_relaxation(
-        std::span<const point> sites, double min_delta,
-        int max_iterations, const rect& bounds ) {
+    std::span<const point> sites,
+    double min_delta_thresh,
+    int max_iterations,
+    const rect& bounds)
+{
     if (sites.empty()) {
         return {};
     }
@@ -475,28 +419,28 @@ std::vector<cz::point> cz::perform_lloyd_relaxation(
     double max_delta = std::numeric_limits<double>::max();
     auto points = sites | r::to<std::vector>();
 
-    while (iter++ < max_iterations && max_delta > min_delta) {
+    while (iter++ < max_iterations && max_delta > min_delta_thresh) {
         auto polygons = to_voronoi_polygons(points, bounds);
 
         auto centroids = polygons |
             rv::transform(
                 [](const auto& p) -> point {
                     if (p.empty()) {
-                        throw std::runtime_error("empty polyogn");
+                        throw std::runtime_error("attempted to centroid an empty Voronoi cell");
                     }
-                    return centroid(p);
+                    return cz::centroid(p);
                 }
-            ) |  r::to<std::vector>();
+            ) | r::to<std::vector>();
 
-            max_delta = r::max(
-                rv::zip(centroids, points) |
-                rv::transform([](const auto& pair) -> double {
-                    const auto& [lhs, rhs] = pair;
-                    return distance(lhs, rhs);
-                    })
-            );
+        max_delta = r::max(
+            rv::zip(centroids, points) |
+            rv::transform([](const auto& pair) -> double {
+                const auto& [lhs, rhs] = pair;
+                return cz::distance(lhs, rhs);
+                })
+        );
 
-         points = std::move(centroids);
+        points = std::move(centroids);
     }
 
     return points;

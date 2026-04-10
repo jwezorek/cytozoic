@@ -99,7 +99,7 @@ void cz::cytozoic_widget::set(const cyto_frame& v) {
         };
 
     QPainter painter(&framebuffer_);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::Antialiasing, false);
     painter.setPen(QPen(Qt::black, 1.0));
 
     for (const auto& c : v) {

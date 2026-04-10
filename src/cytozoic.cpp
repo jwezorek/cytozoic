@@ -254,8 +254,22 @@ cz::cyto_frame cz::interpolate_cyto_frames( std::span<const cz::frame_cell> from
     return result;
 }
 
-cz::cyto_state cz::apply_state_table(
+cz::cyto_state_transition cz::apply_state_table(
         const cyto_state& state, const state_table& tbl, const neighborhood_indexer& indexer) {
     auto state_graph = build_live_cell_graph(state);
-    return {};
+
+    cyto_state from_state;
+    cyto_state to_state;
+
+    for (const auto& cell : state_graph | rv::values) {
+        auto neighborhood = cell.neighbors | rv::transform(
+                [&](auto neighbor) {
+                    return state_graph.at(neighbor).state;
+                }
+            ) | r::to<std::vector>();
+        auto column = indexer->column_index(neighborhood, tbl.size());
+        const auto& new_state = tbl.at(cell.id).at(column);
+    }
+
+    return { from_state, to_state };
 }

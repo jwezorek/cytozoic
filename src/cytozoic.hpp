@@ -62,8 +62,13 @@ namespace cz {
     };
 
     using state_table = std::vector<std::vector<state_table_item>>;
+
+    struct cyto_state_transition {
+        cyto_state from;
+        cyto_state to;
+    };
     
-    cyto_state apply_state_table(
+    cyto_state_transition apply_state_table(
         const cyto_state& state,
         const state_table& tbl,
         const neighborhood_indexer& indexer
