@@ -22,14 +22,22 @@ namespace cz {
         polygon shape;
         color color;
         point site;
+        double weight;
     };
 
     using cyto_frame = std::vector<frame_cell>;
+
+    enum class life_stage {
+        new_born,
+        normal,
+        dying
+    };
 
     struct cell_state {
         cell_id id;
         point site;
         int8_t state;
+        life_stage phase;
     };
 
     using cyto_state = std::vector<cell_state>;
@@ -56,22 +64,32 @@ namespace cz {
         double t
     );
 
-    struct state_table_item {
-        int8_t new_state;
-        int8_t spawn_state;
-    };
-
-    using state_table = std::vector<std::vector<state_table_item>>;
+    using state_table_row = std::vector<int8_t>;
+    using state_table = std::vector<state_table_row>;
 
     struct cyto_state_transition {
         cyto_state from;
         cyto_state to;
     };
-    
-    cyto_state_transition apply_state_table(
+
+    cyto_state_transition generate_transition(
         const cyto_state& state,
-        const state_table& tbl,
-        const neighborhood_indexer& indexer
+        const std::vector<cell_id>& delete_cells,
+        const std::vector<cell_state> add_cells
+    );
+
+    struct state_table_result {
+        cyto_state next_state;
+        cyto_frame anim_start;
+        cyto_frame anim_end;
+    };
+    
+    state_table_result apply_state_tables(
+        const cyto_state& state,
+        const state_table& cell_tbl,
+        const neighborhood_indexer& cell_indexer,
+        const state_table_row& vert_tbl,
+        const neighborhood_indexer& vert_indexer
     );
 
 }
