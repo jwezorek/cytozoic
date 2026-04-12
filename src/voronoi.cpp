@@ -461,6 +461,23 @@ namespace
         return neighbors;
     }
 
+    std::vector<bool> build_power_visibility(std::span<const cz::weighted_point> sites)
+    {
+        std::vector<bool> visible(sites.size(), false);
+
+        if (sites.empty()) {
+            return visible;
+        }
+
+        regular_triangulation rt = build_regular_triangulation(sites);
+
+        for (auto vit = rt.finite_vertices_begin(); vit != rt.finite_vertices_end(); ++vit) {
+            visible[vit->info()] = true;
+        }
+
+        return visible;
+    }
+
     template<typename Sites>
     cz::polygon construct_cell_polygon(
         const Sites& sites,
@@ -693,30 +710,28 @@ namespace
             const auto graph = cz::to_voronoi_topology(input, bounds);
             const auto polygons = cz::to_voronoi_polygons(input, graph, bounds);
 
-            auto centroids = polygons
-                | rv::transform([](const auto& poly) -> cz::point {
-                if (poly.empty()) {
-                    throw std::runtime_error(
-                        "attempted to centroid an empty Voronoi cell"
-                    );
-                }
-
-                return cz::centroid(poly);
-                    })
-                | r::to<std::vector>();
-
             max_delta = r::max(
-                rv::zip(centroids, input)
+                rv::zip(polygons, input)
                 | rv::transform([&](const auto& pair) -> double {
-                    const auto& [centroid, site] = pair;
-                    return cz::distance(centroid, get_point(site));
+                    const auto& [poly, site] = pair;
+
+                    if (poly.empty()) {
+                        return 0.0;
+                    }
+
+                    return cz::distance(cz::centroid(poly), get_point(site));
                     })
             );
 
-            input = rv::zip(centroids, input)
+            input = rv::zip(polygons, input)
                 | rv::transform([&](const auto& pair) -> Site {
-                const auto& [centroid, site] = pair;
-                return rebind_point(site, centroid);
+                const auto& [poly, site] = pair;
+
+                if (poly.empty()) {
+                    return site;
+                }
+
+                return rebind_point(site, cz::centroid(poly));
                     })
                 | r::to<std::vector>();
         }
@@ -844,12 +859,18 @@ std::vector<cz::polygon> cz::to_voronoi_polygons(
     std::iota(indices.begin(), indices.end(), std::size_t{ 0 });
 
     const weighted_sites_view site_view{ sites };
+    const std::vector<bool> visible = build_power_visibility(sites);
 
     std::for_each(
         std::execution::par,
         indices.begin(),
         indices.end(),
         [&](std::size_t i) {
+            if (!visible[i]) {
+                result[i] = {};
+                return;
+            }
+
             result[i] = construct_cell_polygon(
                 site_view,
                 i,

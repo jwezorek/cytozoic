@@ -94,12 +94,15 @@ void cz::main_window::showEvent(QShowEvent* event) {
     anim.initialized = true;
 
     cz::cell_id_source ids;
-    auto from_state = random_cyto_state(5000, 4, ids);
-    ids.reset();
-    auto to_state = random_cyto_state(5000, 4, ids);
+    std::vector<cell_id> delete_list = { 3 };
+    auto state = random_cyto_state(5, 4, ids);
+    auto trans = generate_transition(state,
+        delete_list,
+        {}
+    );
 
     cz::color_table palette = {
-        {0, 0, 0},
+        {0, 255, 0},
         {255, 0, 0},
         {255, 255, 130},
         {0, 60, 200}
@@ -107,8 +110,8 @@ void cz::main_window::showEvent(QShowEvent* event) {
 
     canvas_->set_show_cell_nuceli(false);
 
-    anim.from = to_cyto_frame(from_state, palette);
-    anim.to = to_cyto_frame(to_state, palette);
+    anim.from = to_cyto_frame(trans.from, palette);
+    anim.to = to_cyto_frame(trans.to, palette);
 
     canvas_->set(anim.from);
     centralWidget()->setFocus();
