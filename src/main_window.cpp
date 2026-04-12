@@ -94,9 +94,9 @@ void cz::main_window::showEvent(QShowEvent* event) {
     anim.initialized = true;
 
     cz::cell_id_source ids;
-    auto from_state = random_cyto_state(100, 4, ids);
+    auto from_state = random_cyto_state(5000, 4, ids);
     ids.reset();
-    auto to_state = random_cyto_state(100, 4, ids);
+    auto to_state = random_cyto_state(5000, 4, ids);
 
     cz::color_table palette = {
         {0, 0, 0},
