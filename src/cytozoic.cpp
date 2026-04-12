@@ -2,11 +2,8 @@
 #include "geometry.hpp"
 #include "voronoi.hpp"
 
-#include <boost/container_hash/hash.hpp>
-
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
 #include <random>
 #include <ranges>
 #include <stdexcept>
@@ -25,59 +22,32 @@ namespace
     constexpr auto k_lloyd_min_delta = 0.001;
     constexpr auto k_max_iterations = 20;
 
-    struct point_key {
-        static constexpr double k_scale = 1000000.0;
-
-        std::int64_t x{};
-        std::int64_t y{};
-        cz::point pt{};
-
-        point_key() = default;
-
-        explicit point_key(const cz::point& pt)
-            : x(static_cast<std::int64_t>(std::llround(pt.x* k_scale))),
-            y(static_cast<std::int64_t>(std::llround(pt.y* k_scale))),
-            pt(pt)
-        {}
-
-        friend bool operator==(const point_key& a, const point_key& b) {
-            return a.x == b.x && a.y == b.y;
-        }
-
-        cz::point get() const {
-            return pt;
-        }
-    };
-
-    struct point_key_hasher {
-        std::size_t operator()(const point_key& key) const noexcept {
-            std::size_t seed = 0;
-            boost::hash_combine(seed, key.x);
-            boost::hash_combine(seed, key.y);
-            return seed;
-        }
-    };
-
-    template<typename V>
-    using point_map = std::unordered_map<point_key, V, point_key_hasher>;
-
     struct cell {
         cz::cell_id id;
         cz::point site;
         int8_t state;
-        cz::polygon shape;
         std::vector<cz::cell_id> neighbors;
     };
 
+    struct vertex_neighborhood {
+        cz::point vertex;
+        std::vector<cz::cell_id> cells;
+    };
+
     using cell_graph = std::unordered_map<cz::cell_id, cell>;
-    using vertex_neighborhood_table = point_map<std::vector<cz::cell_id>>;
+
+    struct topology_snapshot {
+        cell_graph graph;
+        std::vector<vertex_neighborhood> vertex_neighborhoods;
+    };
 
     cz::color interpolate_color(const cz::color& from, const cz::color& to, double t) {
         t = std::clamp(t, 0.0, 1.0);
 
         auto lerp_channel = [t](uint8_t a, uint8_t b) -> uint8_t {
-            const double value = static_cast<double>(a)
-                + (static_cast<double>(b) - static_cast<double>(a)) * t;
+            const double value =
+                static_cast<double>(a) +
+                (static_cast<double>(b) - static_cast<double>(a)) * t;
             return static_cast<uint8_t>(std::round(value));
             };
 
@@ -152,7 +122,8 @@ namespace
                 if (released_ids.insert(cell.id).second) {
                     id_source.release(cell.id);
                 }
-            } else {
+            }
+            else {
                 live_cells.push_back(cell);
             }
         }
@@ -160,36 +131,35 @@ namespace
         return live_cells;
     }
 
-    cell_graph build_cell_graph(const std::vector<cz::cell_state>& live_cells) {
-
-        cell_graph graph;
+    topology_snapshot build_topology_snapshot(const std::vector<cz::cell_state>& live_cells) {
+        topology_snapshot snapshot;
 
         if (live_cells.empty()) {
-            return graph;
+            return snapshot;
         }
 
-        std::vector<cz::point> sites = live_cells | rv::transform(
-                [](const auto& cell) {
+        const auto sites = live_cells | rv::transform(
+                [](const cz::cell_state& cell) -> cz::point {
                     return cell.site;
                 }
             ) | r::to<std::vector>();
 
         const auto neighbors = cz::to_voronoi_topology(sites);
-        const auto polygons = cz::to_voronoi_polygons(sites, neighbors);
+        const auto embedding = cz::to_voronoi_embedding(sites);
 
         if (neighbors.size() != live_cells.size()) {
             throw std::runtime_error(
-                "build_cell_graph: neighbor count mismatch."
+                "build_topology_snapshot: neighbor count mismatch."
             );
         }
 
-        if (polygons.size() != live_cells.size()) {
+        if (embedding.cells.size() != live_cells.size()) {
             throw std::runtime_error(
-                "build_cell_graph: polygon count mismatch."
+                "build_topology_snapshot: embedding cell count mismatch."
             );
         }
 
-        graph.reserve(live_cells.size());
+        snapshot.graph.reserve(live_cells.size());
 
         for (std::size_t i = 0; i < live_cells.size(); ++i) {
             const auto& src = live_cells[i];
@@ -200,57 +170,58 @@ namespace
             for (std::size_t adj_index : neighbors[i]) {
                 if (adj_index >= live_cells.size()) {
                     throw std::runtime_error(
-                        "build_cell_graph: adjacency index out of range."
+                        "build_topology_snapshot: adjacency index out of range."
                     );
                 }
 
                 neighbor_ids.push_back(live_cells[adj_index].id);
             }
 
-            auto [it, inserted] = graph.emplace(
+            auto [it, inserted] = snapshot.graph.emplace(
                 src.id,
                 cell{
                     .id = src.id,
                     .site = src.site,
                     .state = src.state,
-                    .shape = polygons[i],
                     .neighbors = std::move(neighbor_ids)
                 }
             );
 
             if (!inserted) {
-                throw std::runtime_error("build_cell_graph: duplicate cell id.");
+                throw std::runtime_error(
+                    "build_topology_snapshot: duplicate cell id."
+                );
             }
         }
 
-        return graph;
-    }
+        snapshot.vertex_neighborhoods.reserve(embedding.vertices.size());
 
-    vertex_neighborhood_table build_vertex_neighborhood_table(const cell_graph& graph) {
+        for (std::size_t vertex_index = 0; vertex_index < embedding.vertices.size(); ++vertex_index) {
+            std::vector<cz::cell_id> incident_cells;
 
-        vertex_neighborhood_table neighborhoods;
-
-        for (const auto& [id, cell] : graph) {
-            (void)id;
-
-            for (const auto& vertex : cell.shape) {
-                neighborhoods[point_key{ vertex }].push_back(cell.id);
+            for (std::size_t cell_index = 0; cell_index < embedding.cells.size(); ++cell_index) {
+                const auto& polygon_vertices = embedding.cells[cell_index];
+                if (r::find(polygon_vertices, vertex_index) != polygon_vertices.end()) {
+                    incident_cells.push_back(live_cells[cell_index].id);
+                }
             }
+
+            r::sort(incident_cells);
+            incident_cells.erase(r::unique(incident_cells).begin(), incident_cells.end());
+
+            if (incident_cells.size() < 3) {
+                continue;
+            }
+
+            snapshot.vertex_neighborhoods.push_back(
+                vertex_neighborhood{
+                    .vertex = embedding.vertices[vertex_index],
+                    .cells = std::move(incident_cells)
+                }
+            );
         }
 
-        for (auto it = neighborhoods.begin(); it != neighborhoods.end();) {
-            auto& ids = it->second;
-            r::sort(ids);
-            ids.erase(r::unique(ids).begin(), ids.end());
-
-            if (ids.size() < 3) {
-                it = neighborhoods.erase(it);
-            } else {
-                ++it;
-            }
-        }
-
-        return neighborhoods;
+        return snapshot;
     }
 
     double relaxation_weight(cz::life_stage phase) {
@@ -268,7 +239,6 @@ namespace
     }
 
     void relax_cyto_state(cz::cyto_state& state) {
-
         if (state.empty()) {
             return;
         }
@@ -304,9 +274,10 @@ namespace
             std::vector<cz::cell_id>& delete_list,
             const cell_graph& graph,
             const cz::state_table& cell_tbl,
-            const cz::neighborhood_indexer& cell_indexer)  {
+            const cz::neighborhood_indexer& cell_indexer) {
 
         for (const auto& [id, cell] : graph) {
+            (void)id;
 
             if (cell.state < 0) {
                 throw std::runtime_error(
@@ -356,19 +327,19 @@ namespace
     std::vector<cz::cell_state> apply_vertex_table(
             cz::cell_id_source& id_source,
             const cell_graph& graph,
-            const vertex_neighborhood_table& neighborhoods,
+            const std::vector<vertex_neighborhood>& neighborhoods,
             const cz::state_table_row& vert_tbl,
             const cz::neighborhood_indexer& vert_indexer,
             std::size_t num_states) {
 
         std::vector<cz::cell_state> add_list;
 
-        for (const auto& [vert, neighborhood] : neighborhoods) {
-            auto neighborhood_states = neighborhood
-                | rv::transform([&](cz::cell_id id) -> int8_t {
-                return graph.at(id).state;
-                    })
-                | r::to<std::vector>();
+        for (const auto& neighborhood : neighborhoods) {
+            const auto neighborhood_states = neighborhood.cells | rv::transform(
+                    [&](cz::cell_id id) -> int8_t {
+                        return graph.at(id).state;
+                    }
+                ) | r::to<std::vector>();
 
             const std::size_t column =
                 vert_indexer->column_index(neighborhood_states, num_states);
@@ -385,7 +356,7 @@ namespace
                 add_list.push_back(
                     cz::cell_state{
                         .id = id_source.acquire(),
-                        .site = vert.get(),
+                        .site = neighborhood.vertex,
                         .state = spawn_state,
                         .phase = cz::life_stage::new_born
                     }
@@ -400,28 +371,28 @@ namespace
 
 /*------------------------------------------------------------------------------------------------*/
 
-cz::cyto_state cz::random_cyto_state( int num_cells, int num_states, cell_id_source& ids) {
+cz::cyto_state cz::random_cyto_state(int num_cells, int num_states, cell_id_source& ids) {
 
     if (num_cells <= 0) {
         return {};
     }
 
-    auto sites = perform_lloyd_relaxation(
+    const auto sites = perform_lloyd_relaxation(
         random_points(static_cast<std::size_t>(num_cells)),
         k_lloyd_min_delta,
         k_max_iterations
     );
 
-    return sites
-        | rv::transform([&ids, num_states](const auto& pt) -> cell_state {
-        return {
-            .id = ids.acquire(),
-            .site = pt,
-            .state = random_cell_state(num_states),
-            .phase = life_stage::normal
-        };
-            })
-        | r::to<std::vector>();
+    return sites | rv::transform(
+            [&ids, num_states](const auto& pt) -> cell_state {
+                return {
+                    .id = ids.acquire(),
+                    .site = pt,
+                    .state = random_cell_state(num_states),
+                    .phase = life_stage::normal
+                };
+            }
+        ) | r::to<std::vector>();
 }
 
 /*------------------------------------------------------------------------------------------------*/
@@ -432,7 +403,7 @@ cz::cell_id_source::cell_id_source()
 
 cz::cell_id cz::cell_id_source::acquire() {
     if (!free_ids_.empty()) {
-        cell_id id = free_ids_.back();
+        const cell_id id = free_ids_.back();
         free_ids_.pop_back();
         return id;
     }
@@ -459,13 +430,14 @@ cz::cyto_frame cz::to_cyto_frame(
         return {};
     }
 
-    auto sites = state
-        | rv::transform([](const cell_state& cell) -> point {
-        return cell.site;
-            })
-        | r::to<std::vector>();
+    const auto sites = state | rv::transform(
+            [](const cell_state& cell) -> point {
+                return cell.site;
+            }
+        ) | r::to<std::vector>();
 
-    const auto polygons = to_voronoi_polygons(sites);
+    const auto graph = to_voronoi_topology(sites);
+    const auto polygons = to_voronoi_polygons(sites, graph);
 
     if (polygons.size() != state.size()) {
         throw std::runtime_error(
@@ -473,37 +445,37 @@ cz::cyto_frame cz::to_cyto_frame(
         );
     }
 
-    return rv::zip(state, polygons)
-        | rv::transform([&palette](const auto& v) -> frame_cell {
-        const auto& [cell, poly] = v;
+    return rv::zip(state, polygons) | rv::transform(
+        [&palette](const auto& v) -> frame_cell {
+            const auto& [cell, poly] = v;
 
-        if (cell.state < 0) {
-            throw std::out_of_range("cell state cannot be negative.");
+            if (cell.state < 0) {
+                throw std::out_of_range("cell state cannot be negative.");
+            }
+
+            const auto palette_index = static_cast<std::size_t>(cell.state);
+            if (palette_index >= palette.size()) {
+                throw std::out_of_range(
+                    "cell state is out of range for palette."
+                );
+            }
+
+            return {
+                .id = cell.id,
+                .shape = poly,
+                .color = palette[palette_index],
+                .site = cell.site,
+                .weight = (cell.phase == life_stage::normal) ? 1.0 : k_small_weight
+            };
         }
-
-        const auto palette_index = static_cast<std::size_t>(cell.state);
-        if (palette_index >= palette.size()) {
-            throw std::out_of_range(
-                "cell state is out of range for palette."
-            );
-        }
-
-        return {
-            .id = cell.id,
-            .shape = poly,
-            .color = palette[palette_index],
-            .site = cell.site,
-            .weight = (cell.phase == life_stage::normal) ? 1.0 : k_small_weight
-        };
-            })
-        | r::to<std::vector>();
+    ) | r::to<std::vector>();
 }
 
 cz::cyto_frame cz::interpolate_cyto_frames(
-    std::span<const cz::frame_cell> from,
-    std::span<const cz::frame_cell> to,
-    double t)
-{
+        std::span<const cz::frame_cell> from,
+        std::span<const cz::frame_cell> to,
+        double t) {
+
     if (from.size() != to.size()) {
         throw std::runtime_error(
             "interpolate_cyto_frames: frame cell counts differ."
@@ -521,7 +493,7 @@ cz::cyto_frame cz::interpolate_cyto_frames(
     cz::cyto_frame result;
     result.reserve(from.size());
 
-    std::vector<cz::point> sites;
+    std::vector<cz::weighted_point> sites;
     sites.reserve(from.size());
 
     for (const cz::frame_cell& from_cell : from) {
@@ -533,11 +505,19 @@ cz::cyto_frame cz::interpolate_cyto_frames(
         }
 
         cz::frame_cell cell = interpolate_frame_cell(from_cell, *it->second, t);
-        sites.push_back(cell.site);
+
+        sites.push_back(
+            cz::weighted_point{
+                .pt = cell.site,
+                .weight = cell.weight
+            }
+        );
+
         result.push_back(std::move(cell));
     }
 
-    const std::vector<cz::polygon> polygons = cz::to_voronoi_polygons(sites);
+    const auto graph = cz::to_voronoi_topology(sites);
+    const std::vector<cz::polygon> polygons = cz::to_voronoi_polygons(sites, graph);
 
     if (polygons.size() != result.size()) {
         throw std::runtime_error(
@@ -553,14 +533,14 @@ cz::cyto_frame cz::interpolate_cyto_frames(
 }
 
 cz::cyto_state_transition cz::generate_transition(
-    const cyto_state& state,
-    const std::vector<cell_id>& delete_cells,
-    const std::vector<cell_state> add_cells)
-{
+        const cyto_state& state,
+        const std::vector<cell_id>& delete_cells,
+        const std::vector<cell_state> add_cells) {
+
     cyto_state from;
     cyto_state to;
 
-    auto deletion_set = delete_cells | r::to<std::unordered_set>();
+    const auto deletion_set = delete_cells | r::to<std::unordered_set>();
 
     for (const auto& cell : state) {
         if (cell.phase == life_stage::dying) {
@@ -575,8 +555,7 @@ cz::cyto_state_transition cz::generate_transition(
             auto deleted = cell;
             deleted.phase = life_stage::dying;
             to.push_back(deleted);
-        }
-        else {
+        } else {
             to.push_back(new_cell);
         }
     }
@@ -606,19 +585,18 @@ cz::state_table_result cz::apply_state_tables(
         const color_table& palette) {
 
     const auto live_cells = collect_live_cells_and_release_dead(state, id_source);
-    const auto graph = build_cell_graph(live_cells);
-    const auto vertex_neighborhoods = build_vertex_neighborhood_table(graph);
+    const auto snapshot = build_topology_snapshot(live_cells);
 
     cyto_state current;
     current.reserve(live_cells.size());
 
     std::vector<cell_id> delete_list;
-    apply_cell_table(current, delete_list, graph, cell_tbl, cell_indexer);
+    apply_cell_table(current, delete_list, snapshot.graph, cell_tbl, cell_indexer);
 
     const auto add_list = apply_vertex_table(
         id_source,
-        graph,
-        vertex_neighborhoods,
+        snapshot.graph,
+        snapshot.vertex_neighborhoods,
         vert_tbl,
         vert_indexer,
         cell_tbl.size()

@@ -1,9 +1,20 @@
+#pragma once
+
 #include <span>
 #include <vector>
 
 #include "geometry.hpp"
 
+/*------------------------------------------------------------------------------------------------*/
+
 namespace cz {
+
+    using polygon_vertex_indices = std::vector<size_t>;
+
+    struct voronoi_embedding {
+        std::vector<point> vertices;
+        std::vector<polygon_vertex_indices> cells;
+    };
 
     std::vector<std::vector<size_t>> to_voronoi_topology(
         std::span<const point> sites,
@@ -16,7 +27,7 @@ namespace cz {
         const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
     );
 
-    std::vector<polygon> to_voronoi_polygons(
+    voronoi_embedding to_voronoi_embedding(
         std::span<const point> sites,
         const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
     );
@@ -44,7 +55,7 @@ namespace cz {
         const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
     );
 
-    std::vector<polygon> to_voronoi_polygons(
+    voronoi_embedding to_voronoi_embedding(
         std::span<const weighted_point> sites,
         const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
     );
@@ -56,4 +67,4 @@ namespace cz {
         const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
     );
 
-}
+} // namespace cz
