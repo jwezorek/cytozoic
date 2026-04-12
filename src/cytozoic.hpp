@@ -85,11 +85,13 @@ namespace cz {
     };
     
     state_table_result apply_state_tables(
+        cell_id_source& id_source,
         const cyto_state& state,
         const state_table& cell_tbl,
         const neighborhood_indexer& cell_indexer,
         const state_table_row& vert_tbl,
-        const neighborhood_indexer& vert_indexer
+        const neighborhood_indexer& vert_indexer,
+        const color_table& palette
     );
 
 }
