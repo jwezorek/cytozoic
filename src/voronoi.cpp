@@ -595,15 +595,10 @@ namespace
     }
 
     std::vector<std::vector<std::size_t>> build_power_neighbor_lists(
-        std::span<const cz::weighted_point> sites)
+        const regular_triangulation& rt,
+        std::size_t num_sites)
     {
-        std::vector<std::vector<std::size_t>> neighbors(sites.size());
-
-        if (sites.empty()) {
-            return neighbors;
-        }
-
-        regular_triangulation rt = build_regular_triangulation(sites);
+        std::vector<std::vector<std::size_t>> neighbors(num_sites);
 
         for (auto vit = rt.finite_vertices_begin(); vit != rt.finite_vertices_end(); ++vit) {
             const std::size_t source_index = vit->info();
@@ -629,15 +624,11 @@ namespace
         return neighbors;
     }
 
-    std::vector<bool> build_power_visibility(std::span<const cz::weighted_point> sites)
+    std::vector<bool> build_power_visibility(
+        const regular_triangulation& rt,
+        std::size_t num_sites)
     {
-        std::vector<bool> visible(sites.size(), false);
-
-        if (sites.empty()) {
-            return visible;
-        }
-
-        regular_triangulation rt = build_regular_triangulation(sites);
+        std::vector<bool> visible(num_sites, false);
 
         for (auto vit = rt.finite_vertices_begin(); vit != rt.finite_vertices_end(); ++vit) {
             visible[vit->info()] = true;
@@ -893,16 +884,19 @@ namespace
     cz::voronoi_diagram build_weighted_voronoi_diagram_from_power_sites_and_graph(
         std::span<const cz::weighted_point> power_sites,
         const std::vector<std::vector<std::size_t>>& graph,
+        const std::vector<bool>& visible,
         const cz::rect& bounds)
     {
         cz::voronoi_diagram result;
 
-        if (power_sites.empty() || graph.size() != power_sites.size() || !is_valid_bounds(bounds)) {
+        if (power_sites.empty() ||
+            graph.size() != power_sites.size() ||
+            visible.size() != power_sites.size() ||
+            !is_valid_bounds(bounds)) {
             return result;
         }
 
         const weighted_sites_view site_view{ power_sites };
-        const std::vector<bool> visible = build_power_visibility(power_sites);
 
         result.graph = graph;
         result.polygons.resize(power_sites.size());
@@ -953,9 +947,14 @@ namespace
         const std::vector<cz::weighted_point> power_sites =
             map_user_weights_to_power_weights(sites, graph, bounds);
 
+        const regular_triangulation rt = build_regular_triangulation(power_sites);
+        const auto power_graph = build_power_neighbor_lists(rt, power_sites.size());
+        const auto visible = build_power_visibility(rt, power_sites.size());
+
         return build_weighted_voronoi_diagram_from_power_sites_and_graph(
             power_sites,
-            graph,
+            power_graph,
+            visible,
             bounds
         );
     }
@@ -980,11 +979,15 @@ namespace
             unweighted_graph,
             bounds
         );
-        const auto power_graph = build_power_neighbor_lists(power_sites);
+
+        const regular_triangulation rt = build_regular_triangulation(power_sites);
+        const auto power_graph = build_power_neighbor_lists(rt, power_sites.size());
+        const auto visible = build_power_visibility(rt, power_sites.size());
 
         return build_weighted_voronoi_diagram_from_power_sites_and_graph(
             power_sites,
             power_graph,
+            visible,
             bounds
         );
     }
