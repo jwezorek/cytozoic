@@ -94,8 +94,14 @@ void cz::main_window::showEvent(QShowEvent* event) {
     anim.initialized = true;
 
     cz::cell_id_source ids;
-    std::vector<cell_id> delete_list = { 3 };
-    auto state = random_cyto_state(5, 4, ids);
+    std::vector<cell_id> delete_list = { 30, 2, 5, 7 };
+    auto state = random_cyto_state(5000, 4, ids);
+    for (auto& c : state) {
+        c.state = 0;
+    }
+    for (auto i : delete_list) {
+        state[i].state = 1;
+    }
     auto trans = generate_transition(state,
         delete_list,
         {}

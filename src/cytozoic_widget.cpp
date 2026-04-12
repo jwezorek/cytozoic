@@ -218,7 +218,7 @@ void cz::cytozoic_widget::advance_animation() {
 
     if (animation_elapsed_ms_ >= animation_duration_ms_) {
         animation_timer_.stop();
-        set(anim_end_);
+        //set(anim_end_);
     }
 }
 

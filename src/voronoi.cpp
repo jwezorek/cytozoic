@@ -13,6 +13,7 @@
 #include <execution>
 #include <limits>
 #include <map>
+#include <numbers>
 #include <numeric>
 #include <optional>
 #include <ranges>
@@ -29,6 +30,7 @@ namespace rv = std::ranges::views;
 namespace
 {
     constexpr double k_clip_epsilon = 1e-9;
+    constexpr double k_shrink_strength = 6.0;
     constexpr long long k_left_side_label = -1;
     constexpr long long k_right_side_label = -2;
     constexpr long long k_bottom_side_label = -3;
@@ -166,6 +168,11 @@ namespace
         }
 
         return area2;
+    }
+
+    double polygon_area(const cz::polygon& poly)
+    {
+        return std::abs(signed_area_times_two(poly)) * 0.5;
     }
 
     bool is_degenerate_polygon(const cz::polygon& poly, double epsilon)
@@ -426,6 +433,162 @@ namespace
         return neighbors;
     }
 
+    template<typename Sites>
+    cz::polygon construct_cell_polygon(
+        const Sites& sites,
+        std::size_t site_index,
+        const std::vector<std::size_t>& neighbors,
+        const cz::rect& bounds,
+        double epsilon)
+    {
+        if (site_index >= sites.size()) {
+            return {};
+        }
+
+        cz::polygon cell = rect_to_polygon(bounds);
+        const cz::point site = sites.point_at(site_index);
+
+        for (const std::size_t neighbor_index : neighbors) {
+            if (neighbor_index >= sites.size()) {
+                continue;
+            }
+
+            const cz::point neighbor = sites.point_at(neighbor_index);
+
+            if (nearly_equal(site, neighbor, epsilon)) {
+                continue;
+            }
+
+            const clip_line bisector = sites.bisector(site_index, neighbor_index);
+
+            if (std::abs(bisector.normal.x) <= epsilon &&
+                std::abs(bisector.normal.y) <= epsilon) {
+                continue;
+            }
+
+            cell = clip_polygon_against_half_plane(cell, bisector, epsilon);
+
+            if (cell.empty()) {
+                return {};
+            }
+        }
+
+        normalize_polygon(cell, epsilon);
+        return cell;
+    }
+
+    double fallback_local_scale(
+        std::span<const cz::point> sites,
+        const std::vector<std::vector<std::size_t>>& graph,
+        std::size_t i)
+    {
+        if (i >= sites.size()) {
+            return 1.0;
+        }
+
+        const auto& neighbors = graph[i];
+
+        if (!neighbors.empty()) {
+            double sum = 0.0;
+
+            for (std::size_t j : neighbors) {
+                if (j >= sites.size()) {
+                    continue;
+                }
+
+                const double d = cz::distance(sites[i], sites[j]);
+                sum += d * d;
+            }
+
+            const double mean_d2 = sum / static_cast<double>(neighbors.size());
+            return std::max(mean_d2, k_clip_epsilon);
+        }
+
+        return 1.0;
+    }
+
+    std::vector<double> build_local_shrink_scales(
+        std::span<const cz::point> sites,
+        const cz::rect& bounds)
+    {
+        std::vector<double> scales(sites.size(), 1.0);
+
+        if (sites.empty() || !is_valid_bounds(bounds)) {
+            return scales;
+        }
+
+        const auto graph = build_neighbor_lists(sites);
+        const point_sites_view site_view{ sites };
+
+        double fallback_sum = 0.0;
+        std::size_t fallback_count = 0;
+
+        for (std::size_t i = 0; i < sites.size(); ++i) {
+            const cz::polygon poly = construct_cell_polygon(
+                site_view,
+                i,
+                graph[i],
+                bounds,
+                k_clip_epsilon
+            );
+
+            if (!poly.empty()) {
+                const double area = polygon_area(poly);
+                const double radius_squared = area / std::numbers::pi_v<double>;
+                scales[i] = std::max(radius_squared, k_clip_epsilon);
+                fallback_sum += scales[i];
+                ++fallback_count;
+                continue;
+            }
+
+            scales[i] = fallback_local_scale(sites, graph, i);
+        }
+
+        const double global_fallback =
+            fallback_count > 0
+            ? fallback_sum / static_cast<double>(fallback_count)
+            : 1.0;
+
+        for (double& scale : scales) {
+            if (scale <= 0.0) {
+                scale = global_fallback;
+            }
+        }
+
+        return scales;
+    }
+
+    std::vector<cz::weighted_point> map_user_weights_to_power_weights(
+        std::span<const cz::weighted_point> sites,
+        const cz::rect& bounds)
+    {
+        std::vector<cz::weighted_point> mapped;
+        mapped.reserve(sites.size());
+
+        const std::vector<cz::point> points = sites
+            | rv::transform([](const cz::weighted_point& site) -> cz::point {
+            return site.pt;
+                })
+            | r::to<std::vector>();
+
+        const std::vector<double> local_scales =
+            build_local_shrink_scales(points, bounds);
+
+        for (std::size_t i = 0; i < sites.size(); ++i) {
+            const double user_weight = std::clamp(sites[i].weight, 0.0, 1.0);
+            const double shrink_amount = 1.0 - user_weight;
+            const double effective_weight =
+                -k_shrink_strength * local_scales[i] * shrink_amount;
+
+            mapped.push_back({
+                .pt = sites[i].pt,
+                .weight = effective_weight
+                });
+        }
+
+        return mapped;
+    }
+
     std::vector<std::vector<std::size_t>> build_power_neighbor_lists(
         std::span<const cz::weighted_point> sites)
     {
@@ -476,50 +639,6 @@ namespace
         }
 
         return visible;
-    }
-
-    template<typename Sites>
-    cz::polygon construct_cell_polygon(
-        const Sites& sites,
-        std::size_t site_index,
-        const std::vector<std::size_t>& neighbors,
-        const cz::rect& bounds,
-        double epsilon)
-    {
-        if (site_index >= sites.size()) {
-            return {};
-        }
-
-        cz::polygon cell = rect_to_polygon(bounds);
-        const cz::point site = sites.point_at(site_index);
-
-        for (const std::size_t neighbor_index : neighbors) {
-            if (neighbor_index >= sites.size()) {
-                continue;
-            }
-
-            const cz::point neighbor = sites.point_at(neighbor_index);
-
-            if (nearly_equal(site, neighbor, epsilon)) {
-                continue;
-            }
-
-            const clip_line bisector = sites.bisector(site_index, neighbor_index);
-
-            if (std::abs(bisector.normal.x) <= epsilon &&
-                std::abs(bisector.normal.y) <= epsilon) {
-                continue;
-            }
-
-            cell = clip_polygon_against_half_plane(cell, bisector, epsilon);
-
-            if (cell.empty()) {
-                return {};
-            }
-        }
-
-        normalize_polygon(cell, epsilon);
-        return cell;
     }
 
     long long classify_boundary_edge(
@@ -801,6 +920,7 @@ cz::voronoi_embedding cz::to_voronoi_embedding(
 
     const auto graph = to_voronoi_topology(sites, bounds);
     const auto polygons = to_voronoi_polygons(sites, graph, bounds);
+
     return build_embedding_from_polygons(
         point_sites_view{ sites },
         graph,
@@ -842,7 +962,10 @@ std::vector<std::vector<std::size_t>> cz::to_voronoi_topology(
         return {};
     }
 
-    return build_power_neighbor_lists(sites);
+    const std::vector<cz::weighted_point> power_sites =
+        map_user_weights_to_power_weights(sites, bounds);
+
+    return build_power_neighbor_lists(power_sites);
 }
 
 std::vector<cz::polygon> cz::to_voronoi_polygons(
@@ -854,12 +977,15 @@ std::vector<cz::polygon> cz::to_voronoi_polygons(
         return {};
     }
 
+    const std::vector<cz::weighted_point> power_sites =
+        map_user_weights_to_power_weights(sites, bounds);
+
     std::vector<cz::polygon> result(sites.size());
     std::vector<std::size_t> indices(sites.size());
     std::iota(indices.begin(), indices.end(), std::size_t{ 0 });
 
-    const weighted_sites_view site_view{ sites };
-    const std::vector<bool> visible = build_power_visibility(sites);
+    const weighted_sites_view site_view{ power_sites };
+    const std::vector<bool> visible = build_power_visibility(power_sites);
 
     std::for_each(
         std::execution::par,
@@ -892,10 +1018,40 @@ cz::voronoi_embedding cz::to_voronoi_embedding(
         return {};
     }
 
-    const auto graph = to_voronoi_topology(sites, bounds);
-    const auto polygons = to_voronoi_polygons(sites, graph, bounds);
+    const std::vector<cz::weighted_point> power_sites =
+        map_user_weights_to_power_weights(sites, bounds);
+
+    const auto graph = build_power_neighbor_lists(power_sites);
+    const auto visible = build_power_visibility(power_sites);
+
+    std::vector<cz::polygon> polygons(power_sites.size());
+    std::vector<std::size_t> indices(power_sites.size());
+    std::iota(indices.begin(), indices.end(), std::size_t{ 0 });
+
+    const weighted_sites_view site_view{ power_sites };
+
+    std::for_each(
+        std::execution::par,
+        indices.begin(),
+        indices.end(),
+        [&](std::size_t i) {
+            if (!visible[i]) {
+                polygons[i] = {};
+                return;
+            }
+
+            polygons[i] = construct_cell_polygon(
+                site_view,
+                i,
+                graph[i],
+                bounds,
+                k_clip_epsilon
+            );
+        }
+    );
+
     return build_embedding_from_polygons(
-        weighted_sites_view{ sites },
+        site_view,
         graph,
         polygons,
         bounds,
