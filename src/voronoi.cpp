@@ -68,7 +68,9 @@ namespace
 
     struct point_sites_view
     {
-        explicit point_sites_view(std::span<const cz::point> sites) : sites(sites) {}
+        explicit point_sites_view(std::span<const cz::point> sites)
+            : sites(sites)
+        {}
 
         std::size_t size() const
         {
@@ -99,7 +101,9 @@ namespace
 
     struct weighted_sites_view
     {
-        explicit weighted_sites_view(std::span<const cz::weighted_point> sites) : sites(sites) {}
+        explicit weighted_sites_view(std::span<const cz::weighted_point> sites)
+            : sites(sites)
+        {}
 
         std::size_t size() const
         {
@@ -509,15 +513,15 @@ namespace
 
     std::vector<double> build_local_shrink_scales(
         std::span<const cz::point> sites,
+        const std::vector<std::vector<std::size_t>>& graph,
         const cz::rect& bounds)
     {
         std::vector<double> scales(sites.size(), 1.0);
 
-        if (sites.empty() || !is_valid_bounds(bounds)) {
+        if (sites.empty() || graph.size() != sites.size() || !is_valid_bounds(bounds)) {
             return scales;
         }
 
-        const auto graph = build_neighbor_lists(sites);
         const point_sites_view site_view{ sites };
 
         double fallback_sum = 0.0;
@@ -560,6 +564,7 @@ namespace
 
     std::vector<cz::weighted_point> map_user_weights_to_power_weights(
         std::span<const cz::weighted_point> sites,
+        const std::vector<std::vector<std::size_t>>& graph,
         const cz::rect& bounds)
     {
         std::vector<cz::weighted_point> mapped;
@@ -572,7 +577,7 @@ namespace
             | r::to<std::vector>();
 
         const std::vector<double> local_scales =
-            build_local_shrink_scales(points, bounds);
+            build_local_shrink_scales(points, graph, bounds);
 
         for (std::size_t i = 0; i < sites.size(); ++i) {
             const double user_weight = std::clamp(sites[i].weight, 0.0, 1.0);
@@ -808,6 +813,182 @@ namespace
         return embedding;
     }
 
+    template<typename Sites>
+    std::vector<cz::polygon> build_polygons_from_graph(
+        const Sites& sites,
+        const std::vector<std::vector<std::size_t>>& graph,
+        const cz::rect& bounds,
+        double epsilon)
+    {
+        if (sites.size() == 0 || graph.size() != sites.size() || !is_valid_bounds(bounds)) {
+            return {};
+        }
+
+        std::vector<cz::polygon> result(sites.size());
+        std::vector<std::size_t> indices(sites.size());
+        std::iota(indices.begin(), indices.end(), std::size_t{ 0 });
+
+        std::for_each(
+            std::execution::par,
+            indices.begin(),
+            indices.end(),
+            [&](std::size_t i) {
+                result[i] = construct_cell_polygon(
+                    sites,
+                    i,
+                    graph[i],
+                    bounds,
+                    epsilon
+                );
+            }
+        );
+
+        return result;
+    }
+
+    cz::voronoi_diagram build_point_voronoi_diagram_from_graph(
+        std::span<const cz::point> sites,
+        const std::vector<std::vector<std::size_t>>& graph,
+        const cz::rect& bounds)
+    {
+        cz::voronoi_diagram result;
+
+        if (sites.empty() || graph.size() != sites.size() || !is_valid_bounds(bounds)) {
+            return result;
+        }
+
+        const point_sites_view site_view{ sites };
+
+        result.graph = graph;
+        result.polygons = build_polygons_from_graph(
+            site_view,
+            result.graph,
+            bounds,
+            k_clip_epsilon
+        );
+
+        result.embedding = build_embedding_from_polygons(
+            site_view,
+            result.graph,
+            result.polygons,
+            bounds,
+            k_clip_epsilon
+        );
+
+        return result;
+    }
+
+    cz::voronoi_diagram build_point_voronoi_diagram(
+        std::span<const cz::point> sites,
+        const cz::rect& bounds)
+    {
+        if (sites.empty() || !is_valid_bounds(bounds)) {
+            return {};
+        }
+
+        const auto graph = build_neighbor_lists(sites);
+        return build_point_voronoi_diagram_from_graph(sites, graph, bounds);
+    }
+
+    cz::voronoi_diagram build_weighted_voronoi_diagram_from_power_sites_and_graph(
+        std::span<const cz::weighted_point> power_sites,
+        const std::vector<std::vector<std::size_t>>& graph,
+        const cz::rect& bounds)
+    {
+        cz::voronoi_diagram result;
+
+        if (power_sites.empty() || graph.size() != power_sites.size() || !is_valid_bounds(bounds)) {
+            return result;
+        }
+
+        const weighted_sites_view site_view{ power_sites };
+        const std::vector<bool> visible = build_power_visibility(power_sites);
+
+        result.graph = graph;
+        result.polygons.resize(power_sites.size());
+
+        std::vector<std::size_t> indices(power_sites.size());
+        std::iota(indices.begin(), indices.end(), std::size_t{ 0 });
+
+        std::for_each(
+            std::execution::par,
+            indices.begin(),
+            indices.end(),
+            [&](std::size_t i) {
+                if (!visible[i]) {
+                    result.polygons[i] = {};
+                    return;
+                }
+
+                result.polygons[i] = construct_cell_polygon(
+                    site_view,
+                    i,
+                    result.graph[i],
+                    bounds,
+                    k_clip_epsilon
+                );
+            }
+        );
+
+        result.embedding = build_embedding_from_polygons(
+            site_view,
+            result.graph,
+            result.polygons,
+            bounds,
+            k_clip_epsilon
+        );
+
+        return result;
+    }
+
+    cz::voronoi_diagram build_weighted_voronoi_diagram_from_graph(
+        std::span<const cz::weighted_point> sites,
+        const std::vector<std::vector<std::size_t>>& graph,
+        const cz::rect& bounds)
+    {
+        if (sites.empty() || graph.size() != sites.size() || !is_valid_bounds(bounds)) {
+            return {};
+        }
+
+        const std::vector<cz::weighted_point> power_sites =
+            map_user_weights_to_power_weights(sites, graph, bounds);
+
+        return build_weighted_voronoi_diagram_from_power_sites_and_graph(
+            power_sites,
+            graph,
+            bounds
+        );
+    }
+
+    cz::voronoi_diagram build_weighted_voronoi_diagram(
+        std::span<const cz::weighted_point> sites,
+        const cz::rect& bounds)
+    {
+        if (sites.empty() || !is_valid_bounds(bounds)) {
+            return {};
+        }
+
+        const std::vector<cz::point> points = sites
+            | rv::transform([](const cz::weighted_point& site) -> cz::point {
+            return site.pt;
+                })
+            | r::to<std::vector>();
+
+        const auto unweighted_graph = build_neighbor_lists(points);
+        const auto power_sites = map_user_weights_to_power_weights(
+            sites,
+            unweighted_graph,
+            bounds
+        );
+        const auto power_graph = build_power_neighbor_lists(power_sites);
+
+        return build_weighted_voronoi_diagram_from_power_sites_and_graph(
+            power_sites,
+            power_graph,
+            bounds
+        );
+    }
+
     template<typename Site, typename GetPoint, typename RebindPoint>
     std::vector<Site> perform_lloyd_relaxation_impl(
         std::span<const Site> sites,
@@ -826,11 +1007,10 @@ namespace
         auto input = sites | r::to<std::vector>();
 
         while (iter++ < max_iterations && max_delta > min_delta_thresh) {
-            const auto graph = cz::to_voronoi_topology(input, bounds);
-            const auto polygons = cz::to_voronoi_polygons(input, graph, bounds);
+            const auto diagram = cz::to_voronoi_diagram(input, bounds);
 
             max_delta = r::max(
-                rv::zip(polygons, input)
+                rv::zip(diagram.polygons, input)
                 | rv::transform([&](const auto& pair) -> double {
                     const auto& [poly, site] = pair;
 
@@ -842,7 +1022,7 @@ namespace
                     })
             );
 
-            input = rv::zip(polygons, input)
+            input = rv::zip(diagram.polygons, input)
                 | rv::transform([&](const auto& pair) -> Site {
                 const auto& [poly, site] = pair;
 
@@ -877,57 +1057,18 @@ std::vector<std::vector<std::size_t>> cz::to_voronoi_topology(
     return build_neighbor_lists(sites);
 }
 
-std::vector<cz::polygon> cz::to_voronoi_polygons(
+cz::voronoi_diagram cz::to_voronoi_diagram(
     std::span<const point> sites,
-    const std::vector<std::vector<std::size_t>>& graph,
     const rect& bounds)
 {
-    if (sites.empty() || graph.size() != sites.size() || !is_valid_bounds(bounds)) {
-        return {};
-    }
-
-    std::vector<cz::polygon> result(sites.size());
-    std::vector<std::size_t> indices(sites.size());
-    std::iota(indices.begin(), indices.end(), std::size_t{ 0 });
-
-    const point_sites_view site_view{ sites };
-
-    std::for_each(
-        std::execution::par,
-        indices.begin(),
-        indices.end(),
-        [&](std::size_t i) {
-            result[i] = construct_cell_polygon(
-                site_view,
-                i,
-                graph[i],
-                bounds,
-                k_clip_epsilon
-            );
-        }
-    );
-
-    return result;
+    return build_point_voronoi_diagram(sites, bounds);
 }
 
 cz::voronoi_embedding cz::to_voronoi_embedding(
     std::span<const point> sites,
     const rect& bounds)
 {
-    if (sites.empty() || !is_valid_bounds(bounds)) {
-        return {};
-    }
-
-    const auto graph = to_voronoi_topology(sites, bounds);
-    const auto polygons = to_voronoi_polygons(sites, graph, bounds);
-
-    return build_embedding_from_polygons(
-        point_sites_view{ sites },
-        graph,
-        polygons,
-        bounds,
-        k_clip_epsilon
-    );
+    return to_voronoi_diagram(sites, bounds).embedding;
 }
 
 std::vector<cz::point> cz::perform_lloyd_relaxation(
@@ -962,101 +1103,22 @@ std::vector<std::vector<std::size_t>> cz::to_voronoi_topology(
         return {};
     }
 
-    const std::vector<cz::weighted_point> power_sites =
-        map_user_weights_to_power_weights(sites, bounds);
-
-    return build_power_neighbor_lists(power_sites);
+    const auto diagram = to_voronoi_diagram(sites, bounds);
+    return diagram.graph;
 }
 
-std::vector<cz::polygon> cz::to_voronoi_polygons(
+cz::voronoi_diagram cz::to_voronoi_diagram(
     std::span<const weighted_point> sites,
-    const std::vector<std::vector<std::size_t>>& graph,
     const rect& bounds)
 {
-    if (sites.empty() || graph.size() != sites.size() || !is_valid_bounds(bounds)) {
-        return {};
-    }
-
-    const std::vector<cz::weighted_point> power_sites =
-        map_user_weights_to_power_weights(sites, bounds);
-
-    std::vector<cz::polygon> result(sites.size());
-    std::vector<std::size_t> indices(sites.size());
-    std::iota(indices.begin(), indices.end(), std::size_t{ 0 });
-
-    const weighted_sites_view site_view{ power_sites };
-    const std::vector<bool> visible = build_power_visibility(power_sites);
-
-    std::for_each(
-        std::execution::par,
-        indices.begin(),
-        indices.end(),
-        [&](std::size_t i) {
-            if (!visible[i]) {
-                result[i] = {};
-                return;
-            }
-
-            result[i] = construct_cell_polygon(
-                site_view,
-                i,
-                graph[i],
-                bounds,
-                k_clip_epsilon
-            );
-        }
-    );
-
-    return result;
+    return build_weighted_voronoi_diagram(sites, bounds);
 }
 
 cz::voronoi_embedding cz::to_voronoi_embedding(
     std::span<const weighted_point> sites,
     const rect& bounds)
 {
-    if (sites.empty() || !is_valid_bounds(bounds)) {
-        return {};
-    }
-
-    const std::vector<cz::weighted_point> power_sites =
-        map_user_weights_to_power_weights(sites, bounds);
-
-    const auto graph = build_power_neighbor_lists(power_sites);
-    const auto visible = build_power_visibility(power_sites);
-
-    std::vector<cz::polygon> polygons(power_sites.size());
-    std::vector<std::size_t> indices(power_sites.size());
-    std::iota(indices.begin(), indices.end(), std::size_t{ 0 });
-
-    const weighted_sites_view site_view{ power_sites };
-
-    std::for_each(
-        std::execution::par,
-        indices.begin(),
-        indices.end(),
-        [&](std::size_t i) {
-            if (!visible[i]) {
-                polygons[i] = {};
-                return;
-            }
-
-            polygons[i] = construct_cell_polygon(
-                site_view,
-                i,
-                graph[i],
-                bounds,
-                k_clip_epsilon
-            );
-        }
-    );
-
-    return build_embedding_from_polygons(
-        site_view,
-        graph,
-        polygons,
-        bounds,
-        k_clip_epsilon
-    );
+    return to_voronoi_diagram(sites, bounds).embedding;
 }
 
 std::vector<cz::point> cz::perform_lloyd_relaxation(
