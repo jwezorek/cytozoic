@@ -18,7 +18,7 @@ namespace rv = std::ranges::views;
 
 namespace
 {
-    constexpr auto k_small_weight = 0.0001;
+    constexpr auto k_small_weight = 0.01;
     constexpr auto k_lloyd_min_delta = 0.001;
     constexpr auto k_max_iterations = 20;
 
