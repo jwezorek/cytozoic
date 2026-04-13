@@ -559,16 +559,16 @@ cz::cyto_frame cz::interpolate_cyto_frames(
         result.push_back(std::move(cell));
     }
 
-    const auto diagram = cz::to_voronoi_diagram(sites);
+    const auto polygons = cz::to_voronoi_polygons(sites);
 
-    if (diagram.polygons.size() != result.size()) {
+    if (polygons.size() != result.size()) {
         throw std::runtime_error(
             "interpolate_cyto_frames: polygon count mismatch."
         );
     }
 
     for (std::size_t i = 0; i < result.size(); ++i) {
-        result[i].shape = diagram.polygons[i];
+        result[i].shape = polygons[i];
     }
 
     return result;

@@ -33,6 +33,11 @@ namespace cz {
         const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
     );
 
+    std::vector<polygon> to_voronoi_polygons(
+        std::span<const point> sites,
+        const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
+    );
+
     voronoi_embedding to_voronoi_embedding(
         std::span<const point> sites,
         const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
@@ -46,6 +51,11 @@ namespace cz {
     );
 
     std::vector<std::vector<size_t>> to_voronoi_topology(
+        std::span<const weighted_point> sites,
+        const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
+    );
+
+    std::vector<polygon> to_voronoi_polygons(
         std::span<const weighted_point> sites,
         const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
     );

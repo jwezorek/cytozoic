@@ -94,17 +94,52 @@ void cz::main_window::showEvent(QShowEvent* event) {
     anim.initialized = true;
 
     cz::cell_id_source ids;
-    std::vector<cell_id> delete_list = { 30, 2, 5, 7, 134, 45, 234, 17, 18 };
-    auto state = random_cyto_state(5000, 4, ids);
+    auto state = random_cyto_state(500, 4, ids);
+
     for (auto& c : state) {
         c.state = 0;
     }
-    for (auto i : delete_list) {
-        state[i].state = 1;
+
+    const auto sites = state
+        | rv::transform([](const cz::cell_state& cell) -> cz::point {
+        return cell.site;
+            })
+        | r::to<std::vector>();
+
+    const auto diagram = cz::to_voronoi_diagram(sites);
+
+    std::vector<cz::cell_state> add_list;
+    add_list.reserve(8);
+
+    // Pick a few reasonably separated Voronoi vertices.
+    // Stepping through the embedding vertices is a simple way to avoid
+    // clustering all births in one tiny region.
+    constexpr std::size_t num_to_add = 8;
+
+    if (!diagram.embedding.vertices.empty()) {
+        const std::size_t step = std::max<std::size_t>(
+            1,
+            diagram.embedding.vertices.size() / num_to_add
+        );
+
+        for (std::size_t i = 0;
+            i < diagram.embedding.vertices.size() && add_list.size() < num_to_add;
+            i += step) {
+            add_list.push_back(
+                cz::cell_state{
+                    .id = ids.acquire(),
+                    .site = diagram.embedding.vertices[i],
+                    .state = 1,
+                    .phase = cz::life_stage::new_born
+                }
+            );
+        }
     }
-    auto trans = generate_transition(state,
-        delete_list,
-        {}
+
+    auto trans = generate_transition(
+        state,
+        {},
+        add_list
     );
 
     cz::color_table palette = {
@@ -116,10 +151,12 @@ void cz::main_window::showEvent(QShowEvent* event) {
 
     canvas_->set_show_cell_nuceli(false);
 
+    const auto initial_frame = to_cyto_frame(state, palette);
+
     anim.from = to_cyto_frame(trans.from, palette);
     anim.to = to_cyto_frame(trans.to, palette);
 
-    canvas_->set(anim.from);
+    canvas_->set(initial_frame);
     centralWidget()->setFocus();
 }
 

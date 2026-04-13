@@ -60,6 +60,12 @@ namespace
     using regular_vertex_handle = regular_triangulation::Vertex_handle;
     using regular_vertex_circulator = regular_triangulation::Vertex_circulator;
 
+    enum class embedding_mode
+    {
+        omit,
+        build
+    };
+
     struct clip_line
     {
         cz::point point_on_line;
@@ -750,7 +756,8 @@ namespace
     cz::voronoi_diagram build_point_voronoi_diagram_from_graph(
         std::span<const cz::point> sites,
         const std::vector<std::vector<std::size_t>>& graph,
-        const cz::rect& bounds)
+        const cz::rect& bounds,
+        embedding_mode mode)
     {
         cz::voronoi_diagram result;
 
@@ -768,34 +775,38 @@ namespace
             k_clip_epsilon
         );
 
-        result.embedding = build_embedding_from_polygons(
-            site_view,
-            result.graph,
-            result.polygons,
-            bounds,
-            k_clip_epsilon
-        );
+        if (mode == embedding_mode::build) {
+            result.embedding = build_embedding_from_polygons(
+                site_view,
+                result.graph,
+                result.polygons,
+                bounds,
+                k_clip_epsilon
+            );
+        }
 
         return result;
     }
 
     cz::voronoi_diagram build_point_voronoi_diagram(
         std::span<const cz::point> sites,
-        const cz::rect& bounds)
+        const cz::rect& bounds,
+        embedding_mode mode)
     {
         if (sites.empty() || !is_valid_bounds(bounds)) {
             return {};
         }
 
         const auto graph = build_neighbor_lists(sites);
-        return build_point_voronoi_diagram_from_graph(sites, graph, bounds);
+        return build_point_voronoi_diagram_from_graph(sites, graph, bounds, mode);
     }
 
     cz::voronoi_diagram build_weighted_voronoi_diagram_from_power_sites_and_graph(
         std::span<const cz::weighted_point> power_sites,
         const std::vector<std::vector<std::size_t>>& graph,
         const std::vector<bool>& visible,
-        const cz::rect& bounds)
+        const cz::rect& bounds,
+        embedding_mode mode)
     {
         cz::voronoi_diagram result;
 
@@ -834,13 +845,15 @@ namespace
             }
         );
 
-        result.embedding = build_embedding_from_polygons(
-            site_view,
-            result.graph,
-            result.polygons,
-            bounds,
-            k_clip_epsilon
-        );
+        if (mode == embedding_mode::build) {
+            result.embedding = build_embedding_from_polygons(
+                site_view,
+                result.graph,
+                result.polygons,
+                bounds,
+                k_clip_epsilon
+            );
+        }
 
         return result;
     }
@@ -848,7 +861,8 @@ namespace
     cz::voronoi_diagram build_weighted_voronoi_diagram_from_graph(
         std::span<const cz::weighted_point> sites,
         const std::vector<std::vector<std::size_t>>& graph,
-        const cz::rect& bounds)
+        const cz::rect& bounds,
+        embedding_mode mode)
     {
         if (sites.empty() || graph.size() != sites.size() || !is_valid_bounds(bounds)) {
             return {};
@@ -865,13 +879,15 @@ namespace
             power_sites,
             power_graph,
             visible,
-            bounds
+            bounds,
+            mode
         );
     }
 
     cz::voronoi_diagram build_weighted_voronoi_diagram(
         std::span<const cz::weighted_point> sites,
-        const cz::rect& bounds)
+        const cz::rect& bounds,
+        embedding_mode mode)
     {
         if (sites.empty() || !is_valid_bounds(bounds)) {
             return {};
@@ -887,7 +903,8 @@ namespace
             power_sites,
             power_graph,
             visible,
-            bounds
+            bounds,
+            mode
         );
     }
 
@@ -909,10 +926,10 @@ namespace
         auto input = sites | r::to<std::vector>();
 
         while (iter++ < max_iterations && max_delta > min_delta_thresh) {
-            const auto diagram = cz::to_voronoi_diagram(input, bounds);
+            const auto polygons = cz::to_voronoi_polygons(input, bounds);
 
             max_delta = r::max(
-                rv::zip(diagram.polygons, input)
+                rv::zip(polygons, input)
                 | rv::transform([&](const auto& pair) -> double {
                     const auto& [poly, site] = pair;
 
@@ -924,7 +941,7 @@ namespace
                     })
             );
 
-            input = rv::zip(diagram.polygons, input)
+            input = rv::zip(polygons, input)
                 | rv::transform([&](const auto& pair) -> Site {
                 const auto& [poly, site] = pair;
 
@@ -959,11 +976,18 @@ std::vector<std::vector<std::size_t>> cz::to_voronoi_topology(
     return build_neighbor_lists(sites);
 }
 
+std::vector<cz::polygon> cz::to_voronoi_polygons(
+    std::span<const point> sites,
+    const rect& bounds)
+{
+    return build_point_voronoi_diagram(sites, bounds, embedding_mode::omit).polygons;
+}
+
 cz::voronoi_diagram cz::to_voronoi_diagram(
     std::span<const point> sites,
     const rect& bounds)
 {
-    return build_point_voronoi_diagram(sites, bounds);
+    return build_point_voronoi_diagram(sites, bounds, embedding_mode::build);
 }
 
 cz::voronoi_embedding cz::to_voronoi_embedding(
@@ -1009,11 +1033,18 @@ std::vector<std::vector<std::size_t>> cz::to_voronoi_topology(
     return diagram.graph;
 }
 
+std::vector<cz::polygon> cz::to_voronoi_polygons(
+    std::span<const weighted_point> sites,
+    const rect& bounds)
+{
+    return build_weighted_voronoi_diagram(sites, bounds, embedding_mode::omit).polygons;
+}
+
 cz::voronoi_diagram cz::to_voronoi_diagram(
     std::span<const weighted_point> sites,
     const rect& bounds)
 {
-    return build_weighted_voronoi_diagram(sites, bounds);
+    return build_weighted_voronoi_diagram(sites, bounds, embedding_mode::build);
 }
 
 cz::voronoi_embedding cz::to_voronoi_embedding(

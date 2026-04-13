@@ -185,7 +185,7 @@ void cz::cytozoic_widget::start_transition(const cyto_frame& from, const cyto_fr
 
     animation_timer_.setInterval(animation_frame_interval_ms_);
 
-    set(anim_start_);
+    //set(anim_start_);
     animation_timer_.start();
 }
 
