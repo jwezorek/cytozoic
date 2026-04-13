@@ -95,7 +95,7 @@ void cz::main_window::showEvent(QShowEvent* event) {
 
     cz::cell_id_source ids;
     std::vector<cell_id> delete_list = { 30, 2, 5, 7, 134, 45, 234, 17, 18 };
-    auto state = random_cyto_state(500, 4, ids);
+    auto state = random_cyto_state(5000, 4, ids);
     for (auto& c : state) {
         c.state = 0;
     }

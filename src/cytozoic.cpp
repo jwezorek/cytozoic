@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <numbers>
 
 namespace r = std::ranges;
 namespace rv = std::ranges::views;
@@ -44,6 +45,29 @@ namespace
         std::vector<vertex_neighborhood> vertex_neighborhoods;
     };
 
+    double polygon_area(const cz::polygon& poly)
+    {
+        if (poly.size() < 3) {
+            return 0.0;
+        }
+
+        double area2 = 0.0;
+
+        for (std::size_t i = 0; i < poly.size(); ++i) {
+            const cz::point& a = poly[i];
+            const cz::point& b = poly[(i + 1) % poly.size()];
+            area2 += a.x * b.y - b.x * a.y;
+        }
+
+        return std::abs(area2) * 0.5;
+    }
+
+    double polygon_scale(const cz::polygon& poly)
+    {
+        constexpr double k_min_scale = 1e-9;
+        return std::max(polygon_area(poly) / std::numbers::pi_v<double>, k_min_scale);
+    }
+
     cz::color interpolate_color(const cz::color& from, const cz::color& to, double t)
     {
         t = std::clamp(t, 0.0, 1.0);
@@ -75,12 +99,19 @@ namespace
 
         t = std::clamp(t, 0.0, 1.0);
 
+        const double interpolated_weight =
+            from.weight + (to.weight - from.weight) * t;
+
+        const double scale =
+            (from.weight < to.weight) ? to.scale : from.scale;
+
         return {
             .id = from.id,
             .shape = {},
             .color = interpolate_color(from.color, to.color, t),
             .site = cz::interpolate_point(from.site, to.site, t),
-            .weight = from.weight + (to.weight - from.weight) * t
+            .weight = interpolated_weight,
+            .scale = scale
         };
     }
 
@@ -254,7 +285,8 @@ namespace
             | rv::transform([](const cz::cell_state& cell) -> cz::weighted_point {
             return {
                 .pt = cell.site,
-                .weight = relaxation_weight(cell.phase)
+                .weight = relaxation_weight(cell.phase),
+                .scale = 1.0
             };
                 })
             | r::to<std::vector>();
@@ -474,7 +506,8 @@ cz::cyto_frame cz::to_cyto_frame(
             .shape = poly,
             .color = palette[palette_index],
             .site = cell.site,
-            .weight = (cell.phase == life_stage::normal) ? 1.0 : k_small_weight
+            .weight = (cell.phase == life_stage::normal) ? 1.0 : k_small_weight,
+            .scale = polygon_scale(poly)
         };
             })
         | r::to<std::vector>();
@@ -518,7 +551,8 @@ cz::cyto_frame cz::interpolate_cyto_frames(
         sites.push_back(
             cz::weighted_point{
                 .pt = cell.site,
-                .weight = cell.weight
+                .weight = cell.weight,
+                .scale = cell.scale
             }
         );
 

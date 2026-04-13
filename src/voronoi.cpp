@@ -481,113 +481,23 @@ namespace
         return cell;
     }
 
-    double fallback_local_scale(
-        std::span<const cz::point> sites,
-        const std::vector<std::vector<std::size_t>>& graph,
-        std::size_t i)
-    {
-        if (i >= sites.size()) {
-            return 1.0;
-        }
-
-        const auto& neighbors = graph[i];
-
-        if (!neighbors.empty()) {
-            double sum = 0.0;
-
-            for (std::size_t j : neighbors) {
-                if (j >= sites.size()) {
-                    continue;
-                }
-
-                const double d = cz::distance(sites[i], sites[j]);
-                sum += d * d;
-            }
-
-            const double mean_d2 = sum / static_cast<double>(neighbors.size());
-            return std::max(mean_d2, k_clip_epsilon);
-        }
-
-        return 1.0;
-    }
-
-    std::vector<double> build_local_shrink_scales(
-        std::span<const cz::point> sites,
-        const std::vector<std::vector<std::size_t>>& graph,
-        const cz::rect& bounds)
-    {
-        std::vector<double> scales(sites.size(), 1.0);
-
-        if (sites.empty() || graph.size() != sites.size() || !is_valid_bounds(bounds)) {
-            return scales;
-        }
-
-        const point_sites_view site_view{ sites };
-
-        double fallback_sum = 0.0;
-        std::size_t fallback_count = 0;
-
-        for (std::size_t i = 0; i < sites.size(); ++i) {
-            const cz::polygon poly = construct_cell_polygon(
-                site_view,
-                i,
-                graph[i],
-                bounds,
-                k_clip_epsilon
-            );
-
-            if (!poly.empty()) {
-                const double area = polygon_area(poly);
-                const double radius_squared = area / std::numbers::pi_v<double>;
-                scales[i] = std::max(radius_squared, k_clip_epsilon);
-                fallback_sum += scales[i];
-                ++fallback_count;
-                continue;
-            }
-
-            scales[i] = fallback_local_scale(sites, graph, i);
-        }
-
-        const double global_fallback =
-            fallback_count > 0
-            ? fallback_sum / static_cast<double>(fallback_count)
-            : 1.0;
-
-        for (double& scale : scales) {
-            if (scale <= 0.0) {
-                scale = global_fallback;
-            }
-        }
-
-        return scales;
-    }
-
     std::vector<cz::weighted_point> map_user_weights_to_power_weights(
-        std::span<const cz::weighted_point> sites,
-        const std::vector<std::vector<std::size_t>>& graph,
-        const cz::rect& bounds)
+        std::span<const cz::weighted_point> sites)
     {
         std::vector<cz::weighted_point> mapped;
         mapped.reserve(sites.size());
 
-        const std::vector<cz::point> points = sites
-            | rv::transform([](const cz::weighted_point& site) -> cz::point {
-            return site.pt;
-                })
-            | r::to<std::vector>();
-
-        const std::vector<double> local_scales =
-            build_local_shrink_scales(points, graph, bounds);
-
-        for (std::size_t i = 0; i < sites.size(); ++i) {
-            const double user_weight = std::clamp(sites[i].weight, 0.0, 1.0);
+        for (const cz::weighted_point& site : sites) {
+            const double user_weight = std::clamp(site.weight, 0.0, 1.0);
             const double shrink_amount = 1.0 - user_weight;
+            const double scale = std::max(site.scale, k_clip_epsilon);
             const double effective_weight =
-                -k_shrink_strength * local_scales[i] * shrink_amount;
+                -k_shrink_strength * scale * shrink_amount;
 
             mapped.push_back({
-                .pt = sites[i].pt,
-                .weight = effective_weight
+                .pt = site.pt,
+                .weight = effective_weight,
+                .scale = site.scale
                 });
         }
 
@@ -945,7 +855,7 @@ namespace
         }
 
         const std::vector<cz::weighted_point> power_sites =
-            map_user_weights_to_power_weights(sites, graph, bounds);
+            map_user_weights_to_power_weights(sites);
 
         const regular_triangulation rt = build_regular_triangulation(power_sites);
         const auto power_graph = build_power_neighbor_lists(rt, power_sites.size());
@@ -967,18 +877,7 @@ namespace
             return {};
         }
 
-        const std::vector<cz::point> points = sites
-            | rv::transform([](const cz::weighted_point& site) -> cz::point {
-            return site.pt;
-                })
-            | r::to<std::vector>();
-
-        const auto unweighted_graph = build_neighbor_lists(points);
-        const auto power_sites = map_user_weights_to_power_weights(
-            sites,
-            unweighted_graph,
-            bounds
-        );
+        const auto power_sites = map_user_weights_to_power_weights(sites);
 
         const regular_triangulation rt = build_regular_triangulation(power_sites);
         const auto power_graph = build_power_neighbor_lists(rt, power_sites.size());
@@ -1139,7 +1038,11 @@ std::vector<cz::point> cz::perform_lloyd_relaxation(
             return p.pt;
         },
         [](const cz::weighted_point& old, const cz::point& new_pt) -> cz::weighted_point {
-            return { new_pt, old.weight };
+            return {
+                .pt = new_pt,
+                .weight = old.weight,
+                .scale = old.scale
+            };
         }
     );
 

@@ -22,6 +22,12 @@ namespace cz {
         voronoi_embedding embedding;
     };
 
+    struct weighted_point {
+        point pt;
+        double weight;
+        double scale;
+    };
+
     std::vector<std::vector<size_t>> to_voronoi_topology(
         std::span<const point> sites,
         const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
@@ -38,11 +44,6 @@ namespace cz {
         int max_iterations,
         const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
     );
-
-    struct weighted_point {
-        point pt;
-        double weight;
-    };
 
     std::vector<std::vector<size_t>> to_voronoi_topology(
         std::span<const weighted_point> sites,

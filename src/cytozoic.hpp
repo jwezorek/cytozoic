@@ -23,6 +23,7 @@ namespace cz {
         color color;
         point site;
         double weight;
+        double scale;
     };
 
     using cyto_frame = std::vector<frame_cell>;
