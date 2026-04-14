@@ -57,11 +57,14 @@ namespace cz {
 
     cyto_state random_cyto_state(int num_cells, int num_states, cell_id_source& ids);
 
-    cyto_frame to_cyto_frame(const cyto_state& state, const color_table& palette);
+    cyto_frame to_cyto_frame(
+        const cyto_state& state,
+        const color_table& palette,
+        const std::vector<double>& scales);
 
-    cz::cyto_frame interpolate_cyto_frames(
-        std::span<const cz::frame_cell> from,
-        std::span<const cz::frame_cell> to,
+    cyto_frame interpolate_cyto_frames(
+        std::span<const frame_cell> from,
+        std::span<const frame_cell> to,
         double t
     );
 
@@ -75,6 +78,7 @@ namespace cz {
 
     cyto_state_transition generate_transition(
         const cyto_state& state,
+        const cyto_state& next_state,
         const std::vector<cell_id>& delete_cells,
         const std::vector<cell_state> add_cells
     );

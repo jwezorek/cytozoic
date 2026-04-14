@@ -4,13 +4,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <random>
 #include <ranges>
 #include <stdexcept>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <numbers>
 
 namespace r = std::ranges;
 namespace rv = std::ranges::views;
@@ -45,6 +46,12 @@ namespace
         std::vector<vertex_neighborhood> vertex_neighborhoods;
     };
 
+    enum class normal_scale_source
+    {
+        current,
+        next
+    };
+
     double polygon_area(const cz::polygon& poly)
     {
         if (poly.size() < 3) {
@@ -65,7 +72,10 @@ namespace
     double polygon_scale(const cz::polygon& poly)
     {
         constexpr double k_min_scale = 1e-9;
-        return std::max(polygon_area(poly) / std::numbers::pi_v<double>, k_min_scale);
+        return std::max(
+            polygon_area(poly) / std::numbers::pi_v<double>,
+            k_min_scale
+        );
     }
 
     cz::color interpolate_color(const cz::color& from, const cz::color& to, double t)
@@ -140,30 +150,6 @@ namespace
         static thread_local std::mt19937 rng(std::random_device{}());
         std::uniform_int_distribution<int> dist(0, num_states - 1);
         return static_cast<int8_t>(dist(rng));
-    }
-
-    std::vector<cz::cell_state> collect_live_cells_and_release_dead(
-        const cz::cyto_state& state,
-        cz::cell_id_source& id_source)
-    {
-        std::vector<cz::cell_state> live_cells;
-        live_cells.reserve(state.size());
-
-        std::unordered_set<cz::cell_id> released_ids;
-        released_ids.reserve(state.size());
-
-        for (const auto& cell : state) {
-            if (cell.phase == cz::life_stage::dying) {
-                if (released_ids.insert(cell.id).second) {
-                    id_source.release(cell.id);
-                }
-            }
-            else {
-                live_cells.push_back(cell);
-            }
-        }
-
-        return live_cells;
     }
 
     topology_snapshot build_topology_snapshot(const std::vector<cz::cell_state>& live_cells)
@@ -275,27 +261,151 @@ namespace
         return 1.0;
     }
 
-    void relax_cyto_state(cz::cyto_state& state)
+    std::unordered_map<cz::cell_id, double> make_scale_map(const cz::cyto_state& state)
+    {
+        std::unordered_map<cz::cell_id, double> scale_by_id;
+        scale_by_id.reserve(state.size());
+
+        if (state.empty()) {
+            return scale_by_id;
+        }
+
+        const auto sites = state
+            | rv::transform([](const cz::cell_state& cell) -> cz::point {
+            return cell.site;
+                })
+            | r::to<std::vector>();
+
+        const auto polygons = cz::to_voronoi_polygons(sites);
+
+        if (polygons.size() != state.size()) {
+            throw std::runtime_error(
+                "make_scale_map: polygon count did not match state size."
+            );
+        }
+
+        for (std::size_t i = 0; i < state.size(); ++i) {
+            auto [it, inserted] = scale_by_id.emplace(
+                state[i].id,
+                polygon_scale(polygons[i])
+            );
+
+            if (!inserted) {
+                throw std::runtime_error(
+                    "make_scale_map: duplicate cell id."
+                );
+            }
+        }
+
+        return scale_by_id;
+    }
+
+    std::vector<double> make_transition_scales(
+        const cz::cyto_state& state,
+        const std::unordered_map<cz::cell_id, double>& current_scale_by_id,
+        const std::unordered_map<cz::cell_id, double>& next_scale_by_id,
+        normal_scale_source normal_source)
+    {
+        std::vector<double> scales;
+        scales.reserve(state.size());
+
+        for (const auto& cell : state) {
+            if (cell.phase == cz::life_stage::new_born) {
+                auto it = next_scale_by_id.find(cell.id);
+                if (it == next_scale_by_id.end()) {
+                    throw std::runtime_error(
+                        "make_transition_scales: missing next scale for newborn cell."
+                    );
+                }
+
+                scales.push_back(it->second);
+                continue;
+            }
+
+            if (cell.phase == cz::life_stage::dying) {
+                auto it = current_scale_by_id.find(cell.id);
+                if (it == current_scale_by_id.end()) {
+                    throw std::runtime_error(
+                        "make_transition_scales: missing current scale for dying cell."
+                    );
+                }
+
+                scales.push_back(it->second);
+                continue;
+            }
+
+            if (normal_source == normal_scale_source::current) {
+                auto it = current_scale_by_id.find(cell.id);
+                if (it == current_scale_by_id.end()) {
+                    throw std::runtime_error(
+                        "make_transition_scales: missing current scale for normal cell."
+                    );
+                }
+
+                scales.push_back(it->second);
+            }
+            else {
+                auto it = next_scale_by_id.find(cell.id);
+                if (it == next_scale_by_id.end()) {
+                    throw std::runtime_error(
+                        "make_transition_scales: missing next scale for normal cell."
+                    );
+                }
+
+                scales.push_back(it->second);
+            }
+        }
+
+        return scales;
+    }
+
+    void relax_cyto_state(cz::cyto_state& state, const std::vector<double>& scales)
     {
         if (state.empty()) {
             return;
         }
 
-        const auto weighted_sites = state
-            | rv::transform([](const cz::cell_state& cell) -> cz::weighted_point {
-            return {
-                .pt = cell.site,
-                .weight = relaxation_weight(cell.phase),
-                .scale = 1.0
-            };
-                })
-            | r::to<std::vector>();
+        if (!scales.empty() && scales.size() != state.size()) {
+            throw std::runtime_error(
+                "relax_cyto_state: scale count did not match state size."
+            );
+        }
 
-        const std::vector<cz::point> relaxed_sites = cz::perform_lloyd_relaxation(
-            weighted_sites,
-            k_lloyd_min_delta,
-            k_max_iterations
-        );
+        std::vector<cz::point> relaxed_sites;
+
+        if (scales.empty()) {
+            const auto sites = state
+                | rv::transform([](const cz::cell_state& cell) -> cz::point {
+                return cell.site;
+                    })
+                | r::to<std::vector>();
+
+            relaxed_sites = cz::perform_lloyd_relaxation(
+                sites,
+                k_lloyd_min_delta,
+                k_max_iterations
+            );
+        }
+        else {
+            std::vector<cz::weighted_point> weighted_sites;
+            weighted_sites.reserve(state.size());
+
+            for (std::size_t i = 0; i < state.size(); ++i) {
+                weighted_sites.push_back(
+                    cz::weighted_point{
+                        .pt = state[i].site,
+                        .weight = relaxation_weight(state[i].phase),
+                        .scale = scales[i]
+                    }
+                );
+            }
+
+            relaxed_sites = cz::perform_lloyd_relaxation(
+                weighted_sites,
+                k_lloyd_min_delta,
+                k_max_iterations
+            );
+        }
 
         if (relaxed_sites.size() != state.size()) {
             throw std::runtime_error(
@@ -308,13 +418,14 @@ namespace
         }
     }
 
-    void apply_cell_table(
-        cz::cyto_state& current,
-        std::vector<cz::cell_id>& delete_list,
+    std::tuple<cz::cyto_state, std::vector<cz::cell_id>> apply_cell_table(
         const cell_graph& graph,
         const cz::state_table& cell_tbl,
         const cz::neighborhood_indexer& cell_indexer)
     {
+        cz::cyto_state next;
+        std::vector<cz::cell_id> delete_list;
+
         for (const auto& [id, cell] : graph) {
             (void)id;
 
@@ -348,7 +459,7 @@ namespace
 
             const int8_t new_state = cell_tbl[state_index][column];
 
-            current.push_back(
+            next.push_back(
                 cz::cell_state{
                     .id = cell.id,
                     .site = cell.site,
@@ -361,6 +472,8 @@ namespace
                 delete_list.push_back(cell.id);
             }
         }
+
+        return { next, delete_list };
     }
 
     std::vector<cz::cell_state> apply_vertex_table(
@@ -466,29 +579,70 @@ void cz::cell_id_source::reset()
 
 cz::cyto_frame cz::to_cyto_frame(
     const cyto_state& state,
-    const color_table& palette)
+    const color_table& palette,
+    const std::vector<double>& scales)
 {
     if (state.empty()) {
         return {};
     }
 
-    const auto sites = state
-        | rv::transform([](const cell_state& cell) -> point {
-        return cell.site;
-            })
-        | r::to<std::vector>();
-
-    const auto diagram = to_voronoi_diagram(sites);
-
-    if (diagram.polygons.size() != state.size()) {
+    if (!scales.empty() && scales.size() != state.size()) {
         throw std::runtime_error(
-            "to_cyto_frame: voronoi polygon count did not match cyto_state size."
+            "to_cyto_frame: scale count did not match cyto_state size."
         );
     }
 
-    return rv::zip(state, diagram.polygons)
-        | rv::transform([&palette](const auto& v) -> frame_cell {
-        const auto& [cell, poly] = v;
+    std::vector<cz::polygon> polygons;
+    std::vector<double> frame_scales;
+    frame_scales.reserve(state.size());
+
+    if (scales.empty()) {
+        const auto sites = state
+            | rv::transform([](const cz::cell_state& cell) -> cz::point {
+            return cell.site;
+                })
+            | r::to<std::vector>();
+
+        polygons = cz::to_voronoi_polygons(sites);
+
+        if (polygons.size() != state.size()) {
+            throw std::runtime_error(
+                "to_cyto_frame: voronoi polygon count did not match cyto_state size."
+            );
+        }
+
+        for (const auto& poly : polygons) {
+            frame_scales.push_back(polygon_scale(poly));
+        }
+    }
+    else {
+        std::vector<cz::weighted_point> weighted_sites;
+        weighted_sites.reserve(state.size());
+
+        for (std::size_t i = 0; i < state.size(); ++i) {
+            weighted_sites.push_back(
+                cz::weighted_point{
+                    .pt = state[i].site,
+                    .weight = relaxation_weight(state[i].phase),
+                    .scale = scales[i]
+                }
+            );
+        }
+
+        polygons = cz::to_voronoi_polygons(weighted_sites);
+
+        if (polygons.size() != state.size()) {
+            throw std::runtime_error(
+                "to_cyto_frame: weighted voronoi polygon count did not match cyto_state size."
+            );
+        }
+
+        frame_scales = scales;
+    }
+
+    return rv::zip(state, polygons, frame_scales)
+        | rv::transform([&palette](const auto& v) -> cz::frame_cell {
+        const auto& [cell, poly, scale] = v;
 
         if (cell.state < 0) {
             throw std::out_of_range("cell state cannot be negative.");
@@ -506,8 +660,8 @@ cz::cyto_frame cz::to_cyto_frame(
             .shape = poly,
             .color = palette[palette_index],
             .site = cell.site,
-            .weight = (cell.phase == life_stage::normal) ? 1.0 : k_small_weight,
-            .scale = polygon_scale(poly)
+            .weight = relaxation_weight(cell.phase),
+            .scale = scale
         };
             })
         | r::to<std::vector>();
@@ -576,6 +730,7 @@ cz::cyto_frame cz::interpolate_cyto_frames(
 
 cz::cyto_state_transition cz::generate_transition(
     const cyto_state& state,
+    const cyto_state& next_state,
     const std::vector<cell_id>& delete_cells,
     const std::vector<cell_state> add_cells)
 {
@@ -585,10 +740,6 @@ cz::cyto_state_transition cz::generate_transition(
     const auto deletion_set = delete_cells | r::to<std::unordered_set>();
 
     for (const auto& cell : state) {
-        if (cell.phase == life_stage::dying) {
-            continue;
-        }
-
         auto new_cell = cell;
         new_cell.phase = life_stage::normal;
         from.push_back(new_cell);
@@ -612,29 +763,37 @@ cz::cyto_state_transition cz::generate_transition(
         to.push_back(addee);
     }
 
-    relax_cyto_state(from);
-    relax_cyto_state(to);
+    const auto current_scale_by_id = make_scale_map(state);
+    const auto next_scale_by_id = make_scale_map(next_state);
+
+    const auto to_scales = make_transition_scales(
+        to,
+        current_scale_by_id,
+        next_scale_by_id,
+        normal_scale_source::next
+    );
+
+    relax_cyto_state(to, to_scales);
 
     return { from, to };
 }
 
 cz::state_table_result cz::apply_state_tables(
     cell_id_source& id_source,
-    const cyto_state& state,
+    const cyto_state& current_state,
     const state_table& cell_tbl,
     const neighborhood_indexer& cell_indexer,
     const state_table_row& vert_tbl,
     const neighborhood_indexer& vert_indexer,
     const color_table& palette)
 {
-    const auto live_cells = collect_live_cells_and_release_dead(state, id_source);
-    const auto snapshot = build_topology_snapshot(live_cells);
+    const auto snapshot = build_topology_snapshot(current_state);
 
-    cyto_state current;
-    current.reserve(live_cells.size());
-
-    std::vector<cell_id> delete_list;
-    apply_cell_table(current, delete_list, snapshot.graph, cell_tbl, cell_indexer);
+    auto [next_state, delete_list] = apply_cell_table(
+        snapshot.graph,
+        cell_tbl,
+        cell_indexer
+    );
 
     const auto add_list = apply_vertex_table(
         id_source,
@@ -645,11 +804,36 @@ cz::state_table_result cz::apply_state_tables(
         cell_tbl.size()
     );
 
-    auto trans = generate_transition(current, delete_list, add_list);
+    for (const auto& new_cell : add_list) {
+        auto canonical_cell = new_cell;
+        canonical_cell.phase = life_stage::normal;
+        next_state.push_back(canonical_cell);
+    }
+
+    relax_cyto_state(next_state, {});
+
+    auto trans = generate_transition(current_state, next_state, delete_list, add_list);
+
+    const auto current_scale_by_id = make_scale_map(current_state);
+    const auto next_scale_by_id = make_scale_map(next_state);
+
+    const auto from_scales = make_transition_scales(
+        trans.from,
+        current_scale_by_id,
+        next_scale_by_id,
+        normal_scale_source::current
+    );
+
+    const auto to_scales = make_transition_scales(
+        trans.to,
+        current_scale_by_id,
+        next_scale_by_id,
+        normal_scale_source::next
+    );
 
     return {
-        trans.to,
-        to_cyto_frame(trans.from, palette),
-        to_cyto_frame(trans.to, palette)
+        next_state,
+        to_cyto_frame(trans.from, palette, from_scales),
+        to_cyto_frame(trans.to, palette, to_scales)
     };
 }
