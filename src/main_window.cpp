@@ -228,6 +228,14 @@ cz::main_window::main_window(QWidget* parent)
 
 cz::main_window::~main_window() = default;
 
+void cz::main_window::set_params(const cyto_params& params) {
+    params_ = params;
+}
+
+cz::cyto_params cz::main_window::get_params() const {
+    return params_;
+}
+
 void cz::main_window::create_menus()
 {
     QMenu* file_menu = menuBar()->addMenu(tr("&File"));
@@ -278,15 +286,6 @@ void cz::main_window::create_menus()
         &QAction::triggered,
         this,
         &cz::main_window::view_edit_current_rules
-    );
-
-    QAction* start_conditions_action =
-        cytozoic_menu->addAction(tr("View/Edit Current &Start Conditions..."));
-    QObject::connect(
-        start_conditions_action,
-        &QAction::triggered,
-        this,
-        &cz::main_window::view_edit_current_start_conditions
     );
 
     cytozoic_menu->addSeparator();

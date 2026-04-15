@@ -4,6 +4,7 @@
 #include <QString>
 
 #include "cytozoic_widget.hpp"
+#include "cytozoic.hpp"
 
 class QAction;
 
@@ -15,6 +16,9 @@ namespace cz {
     public:
         explicit main_window(QWidget* parent = nullptr);
         ~main_window() override;
+
+        void set_params(const cyto_params& params);
+        cyto_params get_params() const;
 
     private:
         void create_menus();
@@ -32,6 +36,8 @@ namespace cz {
 
         cytozoic_widget* canvas_ = nullptr;
         QString current_ruleset_path_;
+        cyto_params params_;
+
     };
 
 } // namespace cz

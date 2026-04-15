@@ -99,4 +99,15 @@ namespace cz {
         const color_table& palette
     );
 
+    struct cyto_params {
+        neighborhood_indexer cell_indexer;
+        state_table cell_state_table;
+        neighborhood_indexer vertex_indexer;
+        state_table_row vertex_table;
+        int num_states;
+        int num_initial_cells;
+        std::vector<double> initial_state_density;
+        color_table palette;
+    };
+
 }

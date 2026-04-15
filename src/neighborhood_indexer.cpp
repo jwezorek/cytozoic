@@ -3,8 +3,29 @@
 #include <algorithm>
 #include <numeric>
 #include <stdexcept>
+#include <map>
+#include <vector>
+#include <ranges>
+
+namespace r = std::ranges;
+namespace rv = std::ranges::views;
 
 /*------------------------------------------------------------------------------------------------*/
+
+namespace {
+
+    std::vector<cz::neighborhood_indexer> g_indexers = { 
+
+        pro::make_proxy<cz::neighborhood_indexer_facade>(
+            cz::sum_of_states_indexer{10}
+        ),
+
+        pro::make_proxy<cz::neighborhood_indexer_facade>(
+            cz::max_state_indexer{}
+        )
+    };
+
+}
 
 cz::sum_of_states_indexer::sum_of_states_indexer(std::size_t max_neighbors)
     : max_neighbors_(max_neighbors)
@@ -60,6 +81,11 @@ std::size_t cz::sum_of_states_indexer::num_columns(
     return max_neighbors_ * (num_states - 1) + 1;
 }
 
+std::string cz::sum_of_states_indexer::name() const
+{
+    return "sum of states";
+}
+
 std::size_t cz::max_state_indexer::column_index(
     const std::vector<int8_t>& neighbor_states,
     std::size_t num_states) const
@@ -104,4 +130,20 @@ std::size_t cz::max_state_indexer::num_columns( std::size_t num_states) const {
     }
 
     return num_states;
+}
+
+std::string cz::max_state_indexer::name() const {
+    return "max state";
+}
+
+std::vector<std::string> cz::named_indexers() {
+    return g_indexers | rv::transform(
+        [](const auto& indexer) {
+            return indexer->name();
+        }
+    ) | r::to<std::vector>();
+}
+
+cz::neighborhood_indexer cz::indexer_from_name(const std::string& str) {
+    return{};
 }
