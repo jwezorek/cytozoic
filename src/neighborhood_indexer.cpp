@@ -145,5 +145,11 @@ std::vector<std::string> cz::named_indexers() {
 }
 
 cz::neighborhood_indexer cz::indexer_from_name(const std::string& str) {
-    return{};
+    static std::map<std::string, cz::neighborhood_indexer> name_to_indexer;
+    if (name_to_indexer.empty()) {
+        for (const auto& indexer : g_indexers) {
+            name_to_indexer[indexer->name()] = indexer;
+        }
+    }
+    return name_to_indexer.at(str);
 }

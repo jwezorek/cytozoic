@@ -14,6 +14,20 @@
 #include <QMessageBox>
 #include <QVBoxLayout>
 
+#include <QColorDialog>
+#include <QComboBox>
+#include <QGridLayout>
+#include <QHeaderView>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QPushButton>
+#include <QSignalBlocker>
+#include <QSlider>
+#include <QSpinBox>
+#include <QTabWidget>
+#include <QTableWidget>
+#include <QWidget>
+
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -215,6 +229,498 @@ namespace
         dialog.exec();
     }
 
+    class state_density_editor : public QWidget
+    {
+    public:
+        explicit state_density_editor(QWidget* parent = nullptr)
+            : QWidget(parent)
+        {
+            auto* root = new QVBoxLayout(this);
+            root->setContentsMargins(0, 0, 0, 0);
+            layout_ = new QGridLayout();
+            root->addLayout(layout_);
+            root->addStretch();
+        }
+
+        void set_num_states(int num_states)
+        {
+            if (num_states < 1) {
+                num_states = 1;
+            }
+
+            while (sliders_.size() > static_cast<std::size_t>(num_states)) {
+                remove_last_row();
+            }
+
+            while (sliders_.size() < static_cast<std::size_t>(num_states)) {
+                add_row(static_cast<int>(sliders_.size()));
+            }
+
+            refresh_labels();
+        }
+
+        void set_density(const std::vector<double>& density)
+        {
+            if (sliders_.empty()) {
+                return;
+            }
+
+            std::vector<int> discrete(sliders_.size(), 0);
+
+            if (!density.empty()) {
+                const std::size_t count = std::min(density.size(), sliders_.size());
+
+                for (std::size_t i = 0; i < count; ++i) {
+                    discrete[i] = std::clamp(
+                        static_cast<int>(std::lround(density[i] * 100.0)),
+                        0,
+                        100
+                    );
+                }
+            }
+
+            if (std::ranges::all_of(discrete, [](int v) { return v == 0; })) {
+                discrete.front() = 100;
+            }
+
+            for (std::size_t i = 0; i < sliders_.size(); ++i) {
+                QSignalBlocker blocker(sliders_[i]);
+                sliders_[i]->setValue(discrete[i]);
+            }
+
+            refresh_labels();
+        }
+
+        std::vector<double> density() const
+        {
+            std::vector<double> result;
+            result.reserve(sliders_.size());
+
+            int total = 0;
+            for (const auto* slider : sliders_) {
+                total += slider->value();
+            }
+
+            if (total <= 0) {
+                result.resize(sliders_.size(), 0.0);
+                if (!result.empty()) {
+                    result[0] = 1.0;
+                }
+                return result;
+            }
+
+            for (const auto* slider : sliders_) {
+                result.push_back(
+                    static_cast<double>(slider->value()) /
+                    static_cast<double>(total)
+                );
+            }
+
+            return result;
+        }
+
+    private:
+        void add_row(int state_index)
+        {
+            auto* state_label = new QLabel(
+                QStringLiteral("State %1").arg(state_index),
+                this
+            );
+
+            auto* slider = new QSlider(Qt::Horizontal, this);
+            slider->setRange(0, 100);
+            slider->setValue(state_index == 0 ? 100 : 0);
+
+            auto* value_label = new QLabel(this);
+            value_label->setMinimumWidth(120);
+
+            const int row = static_cast<int>(sliders_.size());
+            layout_->addWidget(state_label, row, 0);
+            layout_->addWidget(slider, row, 1);
+            layout_->addWidget(value_label, row, 2);
+
+            labels_.push_back(state_label);
+            sliders_.push_back(slider);
+            value_labels_.push_back(value_label);
+
+            connect(
+                slider,
+                &QSlider::valueChanged,
+                this,
+                [this]() {
+                    refresh_labels();
+                }
+            );
+        }
+
+        void remove_last_row()
+        {
+            if (sliders_.empty()) {
+                return;
+            }
+
+            delete labels_.back();
+            delete sliders_.back();
+            delete value_labels_.back();
+
+            labels_.pop_back();
+            sliders_.pop_back();
+            value_labels_.pop_back();
+        }
+
+        void refresh_labels()
+        {
+            int total = 0;
+            for (const auto* slider : sliders_) {
+                total += slider->value();
+            }
+
+            for (std::size_t i = 0; i < sliders_.size(); ++i) {
+                labels_[i]->setText(QStringLiteral("State %1").arg(i));
+
+                const int raw = sliders_[i]->value();
+                const double normalized = total > 0
+                    ? static_cast<double>(raw) / static_cast<double>(total)
+                    : 0.0;
+
+                value_labels_[i]->setText(
+                    QStringLiteral("%1  (%2)")
+                    .arg(raw)
+                    .arg(normalized, 0, 'f', 3)
+                );
+            }
+        }
+
+        QGridLayout* layout_ = nullptr;
+        std::vector<QLabel*> labels_;
+        std::vector<QSlider*> sliders_;
+        std::vector<QLabel*> value_labels_;
+    };
+
+    class palette_editor : public QWidget
+    {
+    public:
+        explicit palette_editor(QWidget* parent = nullptr)
+            : QWidget(parent)
+        {
+            auto* root = new QGridLayout(this);
+            root->setContentsMargins(0, 0, 0, 0);
+            layout_ = root;
+        }
+
+        void set_num_states(int num_states)
+        {
+            if (num_states < 1) {
+                num_states = 1;
+            }
+
+            while (buttons_.size() > static_cast<std::size_t>(num_states)) {
+                remove_last_row();
+            }
+
+            while (buttons_.size() < static_cast<std::size_t>(num_states)) {
+                add_row(static_cast<int>(buttons_.size()));
+            }
+
+            refresh_buttons();
+        }
+
+        void set_palette(const cz::color_table& palette)
+        {
+            colors_.clear();
+            colors_.reserve(buttons_.size());
+
+            for (std::size_t i = 0; i < buttons_.size(); ++i) {
+                if (i < palette.size()) {
+                    colors_.push_back(QColor(
+                        palette[i].r,
+                        palette[i].g,
+                        palette[i].b
+                    ));
+                }
+                else {
+                    const int hue = static_cast<int>((360 * i) / std::max<std::size_t>(1, buttons_.size()));
+                    colors_.push_back(QColor::fromHsv(hue, 255, 220));
+                }
+            }
+
+            refresh_buttons();
+        }
+
+        cz::color_table palette() const
+        {
+            cz::color_table result;
+            result.reserve(colors_.size());
+
+            for (const auto& color : colors_) {
+                result.push_back(cz::color{
+                    static_cast<uint8_t>(color.red()),
+                    static_cast<uint8_t>(color.green()),
+                    static_cast<uint8_t>(color.blue())
+                    });
+            }
+
+            return result;
+        }
+
+    private:
+        void add_row(int state_index)
+        {
+            auto* state_label = new QLabel(
+                QStringLiteral("State %1").arg(state_index),
+                this
+            );
+
+            auto* button = new QPushButton(this);
+            button->setMinimumWidth(80);
+            button->setText(QStringLiteral("Pick..."));
+
+            const int row = static_cast<int>(buttons_.size());
+            layout_->addWidget(state_label, row, 0);
+            layout_->addWidget(button, row, 1);
+
+            labels_.push_back(state_label);
+            buttons_.push_back(button);
+            colors_.push_back(QColor::fromHsv((row * 36) % 360, 255, 220));
+
+            connect(
+                button,
+                &QPushButton::clicked,
+                this,
+                [this, row]() {
+                    const QColor chosen = QColorDialog::getColor(
+                        colors_[row],
+                        this,
+                        QStringLiteral("Choose color for state %1").arg(row)
+                    );
+
+                    if (!chosen.isValid()) {
+                        return;
+                    }
+
+                    colors_[row] = chosen;
+                    refresh_buttons();
+                }
+            );
+        }
+
+        void remove_last_row()
+        {
+            if (buttons_.empty()) {
+                return;
+            }
+
+            delete labels_.back();
+            delete buttons_.back();
+
+            labels_.pop_back();
+            buttons_.pop_back();
+            colors_.pop_back();
+        }
+
+        void refresh_buttons()
+        {
+            for (std::size_t i = 0; i < buttons_.size(); ++i) {
+                labels_[i]->setText(QStringLiteral("State %1").arg(i));
+
+                const QColor& color = colors_[i];
+                buttons_[i]->setStyleSheet(
+                    QStringLiteral(
+                        "background-color: rgb(%1, %2, %3);"
+                        "border: 1px solid black;"
+                        "min-height: 24px;"
+                    )
+                    .arg(color.red())
+                    .arg(color.green())
+                    .arg(color.blue())
+                );
+
+                buttons_[i]->setText(
+                    QStringLiteral("(%1, %2, %3)")
+                    .arg(color.red())
+                    .arg(color.green())
+                    .arg(color.blue())
+                );
+            }
+        }
+
+        QGridLayout* layout_ = nullptr;
+        std::vector<QLabel*> labels_;
+        std::vector<QPushButton*> buttons_;
+        std::vector<QColor> colors_;
+    };
+
+    cz::neighborhood_indexer make_indexer_from_dialog_name(const QString& name)
+    {
+        const std::string value = name.toStdString();
+
+        if (value == "sum of states") {
+            return pro::make_proxy<cz::neighborhood_indexer_facade>(
+                cz::sum_of_states_indexer{ 10 }
+            );
+        }
+
+        if (value == "max state") {
+            return pro::make_proxy<cz::neighborhood_indexer_facade>(
+                cz::max_state_indexer{}
+            );
+        }
+
+        throw std::runtime_error("unknown neighborhood indexer name.");
+    }
+
+    QString indexer_name_or_default(
+        const cz::neighborhood_indexer& indexer,
+        const QString& fallback)
+    {
+        if (indexer) {
+            return QString::fromStdString(indexer->name());
+        }
+
+        return fallback;
+    }
+
+    int safe_cell_value(const QTableWidget* table, int row, int col, int fallback = -1)
+    {
+        if (auto* widget = qobject_cast<QSpinBox*>(table->cellWidget(row, col))) {
+            return widget->value();
+        }
+
+        return fallback;
+    }
+
+    void rebuild_state_table(
+        QTableWidget* table,
+        int rows,
+        int columns,
+        int min_value,
+        int max_value)
+    {
+        std::vector<std::vector<int>> old_values(
+            static_cast<std::size_t>(table->rowCount()),
+            std::vector<int>(static_cast<std::size_t>(table->columnCount()), -1)
+        );
+
+        for (int r = 0; r < table->rowCount(); ++r) {
+            for (int c = 0; c < table->columnCount(); ++c) {
+                old_values[r][c] = safe_cell_value(table, r, c, -1);
+            }
+        }
+
+        table->clear();
+        table->setRowCount(rows);
+        table->setColumnCount(columns);
+
+        QStringList headers;
+        headers.reserve(columns);
+        for (int c = 0; c < columns; ++c) {
+            headers.push_back(QString::number(c));
+        }
+
+        table->setHorizontalHeaderLabels(headers);
+
+        QStringList row_headers;
+        row_headers.reserve(rows);
+        for (int r = 0; r < rows; ++r) {
+            row_headers.push_back(QString::number(r));
+        }
+
+        table->setVerticalHeaderLabels(row_headers);
+
+        for (int r = 0; r < rows; ++r) {
+            for (int c = 0; c < columns; ++c) {
+                auto* spin = new QSpinBox(table);
+                spin->setRange(min_value, max_value);
+
+                const int preserved =
+                    (r < static_cast<int>(old_values.size()) &&
+                        c < static_cast<int>(old_values[r].size()))
+                    ? old_values[r][c]
+                    : -1;
+
+                spin->setValue(std::clamp(preserved, min_value, max_value));
+                table->setCellWidget(r, c, spin);
+            }
+        }
+
+        table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+        table->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    }
+
+    void set_state_table_values(
+        QTableWidget* table,
+        const cz::state_table& values)
+    {
+        const int row_count = std::min(table->rowCount(), static_cast<int>(values.size()));
+
+        for (int r = 0; r < row_count; ++r) {
+            const int col_count = std::min(
+                table->columnCount(),
+                static_cast<int>(values[r].size())
+            );
+
+            for (int c = 0; c < col_count; ++c) {
+                if (auto* spin = qobject_cast<QSpinBox*>(table->cellWidget(r, c))) {
+                    spin->setValue(values[r][c]);
+                }
+            }
+        }
+    }
+
+    cz::state_table read_state_table(const QTableWidget* table)
+    {
+        cz::state_table result(
+            static_cast<std::size_t>(table->rowCount()),
+            cz::state_table_row(static_cast<std::size_t>(table->columnCount()), -1)
+        );
+
+        for (int r = 0; r < table->rowCount(); ++r) {
+            for (int c = 0; c < table->columnCount(); ++c) {
+                result[r][c] = static_cast<int8_t>(safe_cell_value(table, r, c, -1));
+            }
+        }
+
+        return result;
+    }
+
+    void set_state_table_row_values(
+        QTableWidget* table,
+        const cz::state_table_row& values)
+    {
+        if (table->rowCount() < 1) {
+            return;
+        }
+
+        const int col_count = std::min(
+            table->columnCount(),
+            static_cast<int>(values.size())
+        );
+
+        for (int c = 0; c < col_count; ++c) {
+            if (auto* spin = qobject_cast<QSpinBox*>(table->cellWidget(0, c))) {
+                spin->setValue(values[c]);
+            }
+        }
+    }
+
+    cz::state_table_row read_state_table_row(const QTableWidget* table)
+    {
+        cz::state_table_row result(
+            static_cast<std::size_t>(table->columnCount()),
+            -1
+        );
+
+        if (table->rowCount() < 1) {
+            return result;
+        }
+
+        for (int c = 0; c < table->columnCount(); ++c) {
+            result[c] = static_cast<int8_t>(safe_cell_value(table, 0, c, -1));
+        }
+
+        return result;
+    }
+
 } // namespace
 
 cz::main_window::main_window(QWidget* parent)
@@ -354,7 +860,249 @@ void cz::main_window::save_ruleset_as()
 
 void cz::main_window::view_edit_current_rules()
 {
-    show_empty_modal_dialog(this, tr("Current Rules"));
+    cyto_params edited = get_params();
+
+    if (edited.num_states < 1) {
+        edited.num_states = 1;
+    }
+
+    if (edited.num_states > 10) {
+        edited.num_states = 10;
+    }
+
+    if (edited.num_initial_cells < 10) {
+        edited.num_initial_cells = 10;
+    }
+
+    if (edited.num_initial_cells > 5000) {
+        edited.num_initial_cells = 5000;
+    }
+
+    if (!edited.cell_indexer) {
+        edited.cell_indexer = pro::make_proxy<cz::neighborhood_indexer_facade>(
+            cz::sum_of_states_indexer{ 10 }
+        );
+    }
+
+    if (!edited.vertex_indexer) {
+        edited.vertex_indexer = pro::make_proxy<cz::neighborhood_indexer_facade>(
+            cz::sum_of_states_indexer{ 10 }
+        );
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Current Rules"));
+    dialog.setModal(true);
+    dialog.resize(1100, 700);
+
+    auto* root_layout = new QVBoxLayout(&dialog);
+    auto* tabs = new QTabWidget(&dialog);
+    root_layout->addWidget(tabs);
+
+    auto* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
+        &dialog
+    );
+    root_layout->addWidget(buttons);
+
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    //--------------------------------------------------------------------------
+    // Initial configuration tab
+    //--------------------------------------------------------------------------
+
+    auto* initial_tab = new QWidget(tabs);
+    auto* initial_layout = new QVBoxLayout(initial_tab);
+    auto* initial_grid = new QGridLayout();
+    initial_layout->addLayout(initial_grid);
+
+    auto* num_states_label = new QLabel(tr("Number of states"), initial_tab);
+    auto* num_states_combo = new QComboBox(initial_tab);
+    for (int i = 1; i <= 10; ++i) {
+        num_states_combo->addItem(QString::number(i), i);
+    }
+
+    auto* num_initial_cells_label = new QLabel(tr("Initial cell count"), initial_tab);
+    auto* num_initial_cells_spin = new QSpinBox(initial_tab);
+    num_initial_cells_spin->setRange(10, 5000);
+
+    auto* state_density_label = new QLabel(tr("State density"), initial_tab);
+    auto* density_editor = new state_density_editor(initial_tab);
+
+    auto* palette_label = new QLabel(tr("Palette"), initial_tab);
+    auto* palette_editor_widget = new palette_editor(initial_tab);
+
+    initial_grid->addWidget(num_states_label, 0, 0);
+    initial_grid->addWidget(num_states_combo, 0, 1);
+    initial_grid->addWidget(num_initial_cells_label, 1, 0);
+    initial_grid->addWidget(num_initial_cells_spin, 1, 1);
+    initial_grid->addWidget(state_density_label, 2, 0, Qt::AlignTop);
+    initial_grid->addWidget(density_editor, 2, 1);
+    initial_grid->addWidget(palette_label, 3, 0, Qt::AlignTop);
+    initial_grid->addWidget(palette_editor_widget, 3, 1);
+
+    initial_layout->addStretch();
+    tabs->addTab(initial_tab, tr("Initial Configuration"));
+
+    //--------------------------------------------------------------------------
+    // Cell table tab
+    //--------------------------------------------------------------------------
+
+    auto* cell_tab = new QWidget(tabs);
+    auto* cell_layout = new QVBoxLayout(cell_tab);
+    auto* cell_top_row = new QHBoxLayout();
+
+    auto* cell_indexer_label = new QLabel(tr("Indexer"), cell_tab);
+    auto* cell_indexer_combo = new QComboBox(cell_tab);
+    for (const auto& name : cz::named_indexers()) {
+        cell_indexer_combo->addItem(QString::fromStdString(name));
+    }
+
+    cell_top_row->addWidget(cell_indexer_label);
+    cell_top_row->addWidget(cell_indexer_combo);
+    cell_top_row->addStretch();
+
+    auto* cell_table = new QTableWidget(cell_tab);
+    cell_table->setAlternatingRowColors(true);
+
+    cell_layout->addLayout(cell_top_row);
+    cell_layout->addWidget(cell_table);
+    tabs->addTab(cell_tab, tr("Cell Table"));
+
+    //--------------------------------------------------------------------------
+    // Vertex table tab
+    //--------------------------------------------------------------------------
+
+    auto* vertex_tab = new QWidget(tabs);
+    auto* vertex_layout = new QVBoxLayout(vertex_tab);
+    auto* vertex_top_row = new QHBoxLayout();
+
+    auto* vertex_indexer_label = new QLabel(tr("Indexer"), vertex_tab);
+    auto* vertex_indexer_combo = new QComboBox(vertex_tab);
+    for (const auto& name : cz::named_indexers()) {
+        vertex_indexer_combo->addItem(QString::fromStdString(name));
+    }
+
+    vertex_top_row->addWidget(vertex_indexer_label);
+    vertex_top_row->addWidget(vertex_indexer_combo);
+    vertex_top_row->addStretch();
+
+    auto* vertex_table = new QTableWidget(vertex_tab);
+    vertex_table->setAlternatingRowColors(true);
+
+    vertex_layout->addLayout(vertex_top_row);
+    vertex_layout->addWidget(vertex_table);
+    tabs->addTab(vertex_tab, tr("Vertex Table"));
+
+    //--------------------------------------------------------------------------
+    // Initialization from current params
+    //--------------------------------------------------------------------------
+
+    num_states_combo->setCurrentIndex(
+        std::max(0, num_states_combo->findData(edited.num_states))
+    );
+    num_initial_cells_spin->setValue(edited.num_initial_cells);
+
+    density_editor->set_num_states(edited.num_states);
+    density_editor->set_density(edited.initial_state_density);
+
+    palette_editor_widget->set_num_states(edited.num_states);
+    palette_editor_widget->set_palette(edited.palette);
+
+    cell_indexer_combo->setCurrentText(
+        indexer_name_or_default(edited.cell_indexer, QStringLiteral("sum of states"))
+    );
+
+    vertex_indexer_combo->setCurrentText(
+        indexer_name_or_default(edited.vertex_indexer, QStringLiteral("sum of states"))
+    );
+
+    auto rebuild_tables = [&]() {
+        const int num_states = num_states_combo->currentData().toInt();
+        const int min_value = -1;
+        const int max_value = num_states - 1;
+
+        density_editor->set_num_states(num_states);
+        palette_editor_widget->set_num_states(num_states);
+
+        const auto cell_indexer =
+            make_indexer_from_dialog_name(cell_indexer_combo->currentText());
+        const auto vertex_indexer =
+            make_indexer_from_dialog_name(vertex_indexer_combo->currentText());
+
+        const int cell_columns =
+            static_cast<int>(cell_indexer->num_columns(static_cast<std::size_t>(num_states)));
+
+        const int vertex_columns =
+            static_cast<int>(vertex_indexer->num_columns(static_cast<std::size_t>(num_states)));
+
+        rebuild_state_table(
+            cell_table,
+            num_states,
+            cell_columns,
+            min_value,
+            max_value
+        );
+
+        rebuild_state_table(
+            vertex_table,
+            1,
+            vertex_columns,
+            min_value,
+            max_value
+        );
+        };
+
+    rebuild_tables();
+    set_state_table_values(cell_table, edited.cell_state_table);
+    set_state_table_row_values(vertex_table, edited.vertex_table);
+
+    connect(
+        num_states_combo,
+        &QComboBox::currentIndexChanged,
+        &dialog,
+        [&](int) {
+            rebuild_tables();
+        }
+    );
+
+    connect(
+        cell_indexer_combo,
+        &QComboBox::currentIndexChanged,
+        &dialog,
+        [&](int) {
+            rebuild_tables();
+        }
+    );
+
+    connect(
+        vertex_indexer_combo,
+        &QComboBox::currentIndexChanged,
+        &dialog,
+        [&](int) {
+            rebuild_tables();
+        }
+    );
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    edited.num_states = num_states_combo->currentData().toInt();
+    edited.num_initial_cells = num_initial_cells_spin->value();
+    edited.initial_state_density = density_editor->density();
+    edited.palette = palette_editor_widget->palette();
+
+    edited.cell_indexer =
+        make_indexer_from_dialog_name(cell_indexer_combo->currentText());
+    edited.vertex_indexer =
+        make_indexer_from_dialog_name(vertex_indexer_combo->currentText());
+
+    edited.cell_state_table = read_state_table(cell_table);
+    edited.vertex_table = read_state_table_row(vertex_table);
+
+    set_params(edited);
 }
 
 void cz::main_window::view_edit_current_start_conditions()
