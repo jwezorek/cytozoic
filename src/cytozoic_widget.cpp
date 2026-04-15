@@ -19,8 +19,6 @@ namespace rv = std::ranges::views;
 
 namespace {
 
-
-
 } // namespace
 
 cz::cytozoic_widget::cytozoic_widget(QWidget* parent, int duration_ms, int interval_ms) :
@@ -161,42 +159,62 @@ void cz::cytozoic_widget::set_show_cell_nuceli(bool show) {
     update();
 }
 
+std::vector<cz::cell_id> cz::cytozoic_widget::take_reclaimable_ids()
+{
+    auto result = reclaimable_ids_;
+    reclaimable_ids_.clear();
+    return result;
+}
+
+void cz::cytozoic_widget::finish_transition()
+{
+    animation_timer_.stop();
+
+    reclaimable_ids_ = cz::deleted_cell_ids(anim_end_);
+
+    const auto final_frame = cz::remove_deleted_cells(anim_end_);
+
+    if (final_frame.empty()) {
+        clear(Qt::black);
+    }
+    else {
+        set(final_frame);
+    }
+
+    emit transition_finished();
+}
+
 void cz::cytozoic_widget::start_transition(const cyto_frame& from, const cyto_frame& to) {
     animation_timer_.stop();
 
     anim_start_ = from;
     anim_end_ = to;
+    reclaimable_ids_.clear();
     animation_elapsed_ms_ = 0;
 
     if (anim_start_.size() != anim_end_.size()) {
-        set(anim_end_);
+        finish_transition();
         return;
     }
 
     if (anim_end_.empty()) {
-        clear(Qt::black);
+        finish_transition();
         return;
     }
 
     if (animation_duration_ms_ <= 0 || animation_frame_interval_ms_ <= 0) {
-        set(anim_end_);
+        finish_transition();
         return;
     }
 
     animation_timer_.setInterval(animation_frame_interval_ms_);
-
-    //set(anim_start_);
+    set(anim_start_);
     animation_timer_.start();
 }
 
 void cz::cytozoic_widget::advance_animation() {
     if (anim_start_.size() != anim_end_.size() || anim_start_.empty()) {
-        animation_timer_.stop();
-
-        if (!anim_end_.empty()) {
-            set(anim_end_);
-        }
-
+        finish_transition();
         return;
     }
 
@@ -217,8 +235,7 @@ void cz::cytozoic_widget::advance_animation() {
     }
 
     if (animation_elapsed_ms_ >= animation_duration_ms_) {
-        animation_timer_.stop();
-        //set(anim_end_);
+        finish_transition();
     }
 }
 

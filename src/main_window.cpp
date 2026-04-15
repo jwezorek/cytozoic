@@ -730,6 +730,13 @@ cz::main_window::main_window(QWidget* parent)
     create_menus();
     setWindowTitle(tr("cytozoic"));
     resize(1200, 1200);
+
+    connect(
+        canvas_,
+        &cz::cytozoic_widget::transition_finished,
+        this,
+        &cz::main_window::on_transition_finished
+    );
 }
 
 cz::main_window::~main_window() = default;
@@ -1112,14 +1119,114 @@ void cz::main_window::view_edit_current_start_conditions()
 
 void cz::main_window::run_simulation()
 {
-    QMessageBox::information(
-        this,
-        tr("Run Simulation"),
-        tr("run_simulation() is currently stubbed in.")
+    try {
+        if (transition_in_flight_) {
+            return;
+        }
+
+        if (!simulation_initialized_) {
+            id_source_.reset();
+            current_state_ = cz::initial_cyto_state(params_, id_source_);
+            pending_next_state_.clear();
+            simulation_initialized_ = true;
+
+            if (current_state_.empty()) {
+                canvas_->clear(Qt::black);
+                return;
+            }
+
+            canvas_->set_show_cell_nuceli(false);
+            canvas_->set(cz::to_cyto_frame(current_state_, params_.palette, {}));
+        }
+
+        simulation_running_ = !simulation_running_;
+
+        if (simulation_running_) {
+            advance_simulation();
+        }
+    }
+    catch (const std::exception& ex) {
+        simulation_running_ = false;
+        transition_in_flight_ = false;
+
+        QMessageBox::critical(
+            this,
+            tr("Run Simulation"),
+            tr("Simulation failed:\n%1").arg(QString::fromUtf8(ex.what()))
+        );
+    }
+}
+
+void cz::main_window::advance_simulation()
+{
+    if (!simulation_running_ || transition_in_flight_) {
+        return;
+    }
+
+    if (!params_.cell_indexer) {
+        throw std::runtime_error("advance_simulation: missing cell indexer.");
+    }
+
+    if (!params_.vertex_indexer) {
+        throw std::runtime_error("advance_simulation: missing vertex indexer.");
+    }
+
+    if (params_.num_states <= 0) {
+        throw std::runtime_error("advance_simulation: num_states must be positive.");
+    }
+
+    if (params_.cell_state_table.size() != static_cast<std::size_t>(params_.num_states)) {
+        throw std::runtime_error(
+            "advance_simulation: cell_state_table row count must equal num_states."
+        );
+    }
+
+    if (params_.vertex_table.size() !=
+        params_.vertex_indexer->num_columns(static_cast<std::size_t>(params_.num_states))) {
+        throw std::runtime_error(
+            "advance_simulation: vertex_table width does not match vertex indexer."
+        );
+    }
+
+    if (params_.palette.size() < static_cast<std::size_t>(params_.num_states)) {
+        throw std::runtime_error("advance_simulation: palette is too small.");
+    }
+
+    const auto result = cz::apply_state_tables(
+        id_source_,
+        current_state_,
+        params_.cell_state_table,
+        params_.cell_indexer,
+        params_.vertex_table,
+        params_.vertex_indexer,
+        params_.palette
     );
 
-    // TODO:
-    // Implement the actual simulation run here.
+    pending_next_state_ = result.next_state;
+    transition_in_flight_ = true;
+
+    canvas_->start_transition(result.anim_start, result.anim_end);
+}
+
+void cz::main_window::on_transition_finished()
+{
+    for (const cz::cell_id id : canvas_->take_reclaimable_ids()) {
+        id_source_.release(id);
+    }
+
+    current_state_ = std::move(pending_next_state_);
+    pending_next_state_.clear();
+    transition_in_flight_ = false;
+
+    if (simulation_running_) {
+        QTimer::singleShot(
+            0,
+            this,
+            [this]() {
+                advance_simulation();
+            }
+        );
+    }
 }
 
 void cz::main_window::run_debug_demo()

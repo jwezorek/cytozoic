@@ -23,6 +23,7 @@ namespace
     constexpr auto k_small_weight = 0.01;
     constexpr auto k_lloyd_min_delta = 0.001;
     constexpr auto k_max_iterations = 20;
+    constexpr double k_deleted_weight_threshold = 0.5;
 
     struct cell
     {
@@ -52,6 +53,21 @@ namespace
         next
     };
 
+    std::mt19937_64 make_rng(std::optional<uint64_t> seed = std::nullopt)
+    {
+        if (seed.has_value()) {
+            return std::mt19937_64(*seed);
+        }
+
+        std::random_device rd;
+        std::seed_seq seq{
+            rd(), rd(), rd(), rd(),
+            rd(), rd(), rd(), rd()
+        };
+
+        return std::mt19937_64(seq);
+    }
+
     double polygon_area(const cz::polygon& poly)
     {
         if (poly.size() < 3) {
@@ -72,13 +88,17 @@ namespace
     double polygon_scale(const cz::polygon& poly)
     {
         constexpr double k_min_scale = 1e-9;
+
         return std::max(
             polygon_area(poly) / std::numbers::pi_v<double>,
             k_min_scale
         );
     }
 
-    cz::color interpolate_color(const cz::color& from, const cz::color& to, double t)
+    cz::color interpolate_color(
+        const cz::color& from,
+        const cz::color& to,
+        double t)
     {
         t = std::clamp(t, 0.0, 1.0);
 
@@ -86,6 +106,7 @@ namespace
             const double value =
                 static_cast<double>(a) +
                 (static_cast<double>(b) - static_cast<double>(a)) * t;
+
             return static_cast<uint8_t>(std::round(value));
             };
 
@@ -139,8 +160,11 @@ namespace
 
         for (const cz::frame_cell& cell : frame) {
             auto [it, inserted] = map.emplace(cell.id, &cell);
+
             if (!inserted) {
-                throw std::runtime_error("duplicate frame_cell id.");
+                throw std::runtime_error(
+                    "make_frame_cell_map: duplicate frame_cell id."
+                );
             }
         }
 
@@ -150,15 +174,63 @@ namespace
     int8_t random_cell_state(int num_states)
     {
         if (num_states <= 0) {
-            throw std::invalid_argument("num_states must be positive.");
+            throw std::invalid_argument("random_cell_state: num_states must be positive.");
         }
 
         static thread_local std::mt19937 rng(std::random_device{}());
         std::uniform_int_distribution<int> dist(0, num_states - 1);
+
         return static_cast<int8_t>(dist(rng));
     }
 
-    topology_snapshot build_topology_snapshot(const std::vector<cz::cell_state>& live_cells)
+    std::vector<double> normalize_density(
+        const std::vector<double>& density,
+        int num_states)
+    {
+        if (num_states <= 0) {
+            throw std::runtime_error(
+                "normalize_density: num_states must be positive."
+            );
+        }
+
+        std::vector<double> result(
+            static_cast<std::size_t>(num_states),
+            0.0
+        );
+
+        const std::size_t count = std::min(
+            result.size(),
+            density.size()
+        );
+
+        for (std::size_t i = 0; i < count; ++i) {
+            result[i] = std::max(0.0, density[i]);
+        }
+
+        const double sum = r::fold_left(result, 0.0, std::plus<>{});
+
+        if (sum <= 0.0) {
+            result.front() = 1.0;
+            return result;
+        }
+
+        for (double& value : result) {
+            value /= sum;
+        }
+
+        return result;
+    }
+
+    int8_t sample_state_from_density(const std::vector<double>& density)
+    {
+        static thread_local std::mt19937 rng(std::random_device{}());
+        std::discrete_distribution<int> dist(density.begin(), density.end());
+
+        return static_cast<int8_t>(dist(rng));
+    }
+
+    topology_snapshot build_topology_snapshot(
+        const std::vector<cz::cell_state>& live_cells)
     {
         topology_snapshot snapshot;
 
@@ -267,7 +339,8 @@ namespace
         return 1.0;
     }
 
-    std::unordered_map<cz::cell_id, double> make_scale_map(const cz::cyto_state& state)
+    std::unordered_map<cz::cell_id, double> make_scale_map(
+        const cz::cyto_state& state)
     {
         std::unordered_map<cz::cell_id, double> scale_by_id;
         scale_by_id.reserve(state.size());
@@ -432,6 +505,8 @@ namespace
         cz::cyto_state next;
         std::vector<cz::cell_id> delete_list;
 
+        next.reserve(graph.size());
+
         for (const auto& [id, cell] : graph) {
             (void)id;
 
@@ -442,13 +517,14 @@ namespace
             }
 
             const auto state_index = static_cast<std::size_t>(cell.state);
+
             if (state_index >= cell_tbl.size()) {
                 throw std::runtime_error(
                     "apply_cell_table: cell state is out of range for cell_tbl."
                 );
             }
 
-            auto neighborhood = cell.neighbors
+            const auto neighborhood = cell.neighbors
                 | rv::transform([&](cz::cell_id neighbor_id) -> int8_t {
                 return graph.at(neighbor_id).state;
                     })
@@ -529,7 +605,10 @@ namespace
 
 /*------------------------------------------------------------------------------------------------*/
 
-cz::cyto_state cz::random_cyto_state(int num_cells, int num_states, cell_id_source& ids)
+cz::cyto_state cz::random_cyto_state(
+    int num_cells,
+    int num_states,
+    cz::cell_id_source& ids)
 {
     if (num_cells <= 0) {
         return {};
@@ -542,15 +621,57 @@ cz::cyto_state cz::random_cyto_state(int num_cells, int num_states, cell_id_sour
     );
 
     return sites
-        | rv::transform([&ids, num_states](const auto& pt) -> cell_state {
+        | rv::transform([&ids, num_states](const auto& pt) -> cz::cell_state {
         return {
             .id = ids.acquire(),
             .site = pt,
             .state = random_cell_state(num_states),
-            .phase = life_stage::normal
+            .phase = cz::life_stage::normal
         };
             })
         | r::to<std::vector>();
+}
+
+cz::cyto_state cz::initial_cyto_state(
+    const cz::cyto_params& params,
+    cz::cell_id_source& ids)
+{
+    if (params.num_states <= 0) {
+        throw std::runtime_error(
+            "initial_cyto_state: num_states must be positive."
+        );
+    }
+
+    if (params.num_initial_cells <= 0) {
+        return {};
+    }
+
+    const auto sites = cz::perform_lloyd_relaxation(
+        cz::random_points(static_cast<std::size_t>(params.num_initial_cells)),
+        k_lloyd_min_delta,
+        k_max_iterations
+    );
+
+    const auto density = normalize_density(
+        params.initial_state_density,
+        params.num_states
+    );
+
+    cz::cyto_state result;
+    result.reserve(sites.size());
+
+    for (const auto& site : sites) {
+        result.push_back(
+            cz::cell_state{
+                .id = ids.acquire(),
+                .site = site,
+                .state = sample_state_from_density(density),
+                .phase = cz::life_stage::normal
+            }
+        );
+    }
+
+    return result;
 }
 
 /*------------------------------------------------------------------------------------------------*/
@@ -562,7 +683,7 @@ cz::cell_id_source::cell_id_source()
 cz::cell_id cz::cell_id_source::acquire()
 {
     if (!free_ids_.empty()) {
-        const cell_id id = free_ids_.back();
+        const cz::cell_id id = free_ids_.back();
         free_ids_.pop_back();
         return id;
     }
@@ -570,7 +691,7 @@ cz::cell_id cz::cell_id_source::acquire()
     return next_id_++;
 }
 
-void cz::cell_id_source::release(cell_id id)
+void cz::cell_id_source::release(cz::cell_id id)
 {
     free_ids_.push_back(id);
 }
@@ -584,8 +705,8 @@ void cz::cell_id_source::reset()
 /*------------------------------------------------------------------------------------------------*/
 
 cz::cyto_frame cz::to_cyto_frame(
-    const cyto_state& state,
-    const color_table& palette,
+    const cz::cyto_state& state,
+    const cz::color_table& palette,
     const std::vector<double>& scales)
 {
     if (state.empty()) {
@@ -651,13 +772,14 @@ cz::cyto_frame cz::to_cyto_frame(
         const auto& [cell, poly, scale] = v;
 
         if (cell.state < 0) {
-            throw std::out_of_range("cell state cannot be negative.");
+            throw std::out_of_range("to_cyto_frame: cell state cannot be negative.");
         }
 
         const auto palette_index = static_cast<std::size_t>(cell.state);
+
         if (palette_index >= palette.size()) {
             throw std::out_of_range(
-                "cell state is out of range for palette."
+                "to_cyto_frame: cell state is out of range for palette."
             );
         }
 
@@ -671,6 +793,33 @@ cz::cyto_frame cz::to_cyto_frame(
         };
             })
         | r::to<std::vector>();
+}
+
+std::vector<cz::cell_id> cz::deleted_cell_ids(std::span<const cz::frame_cell> frame)
+{
+    std::vector<cz::cell_id> result;
+
+    for (const auto& cell : frame) {
+        if (cell.weight < k_deleted_weight_threshold) {
+            result.push_back(cell.id);
+        }
+    }
+
+    return result;
+}
+
+cz::cyto_frame cz::remove_deleted_cells(std::span<const cz::frame_cell> frame)
+{
+    cz::cyto_frame result;
+    result.reserve(frame.size());
+
+    for (const auto& cell : frame) {
+        if (cell.weight >= k_deleted_weight_threshold) {
+            result.push_back(cell);
+        }
+    }
+
+    return result;
 }
 
 cz::cyto_frame cz::interpolate_cyto_frames(
@@ -700,13 +849,15 @@ cz::cyto_frame cz::interpolate_cyto_frames(
 
     for (const cz::frame_cell& from_cell : from) {
         auto it = to_by_id.find(from_cell.id);
+
         if (it == to_by_id.end()) {
             throw std::runtime_error(
                 "interpolate_cyto_frames: frame cell ids do not match."
             );
         }
 
-        cz::frame_cell cell = interpolate_frame_cell(from_cell, *it->second, t);
+        cz::frame_cell cell =
+            interpolate_frame_cell(from_cell, *it->second, t);
 
         sites.push_back(
             cz::weighted_point{
@@ -735,24 +886,27 @@ cz::cyto_frame cz::interpolate_cyto_frames(
 }
 
 cz::cyto_state_transition cz::generate_transition(
-    const cyto_state& state,
-    const cyto_state& next_state,
-    const std::vector<cell_id>& delete_cells,
-    const std::vector<cell_state> add_cells)
+    const cz::cyto_state& state,
+    const cz::cyto_state& next_state,
+    const std::vector<cz::cell_id>& delete_cells,
+    const std::vector<cz::cell_state> add_cells)
 {
-    cyto_state from;
-    cyto_state to;
+    cz::cyto_state from;
+    cz::cyto_state to;
 
     const auto deletion_set = delete_cells | r::to<std::unordered_set>();
 
+    from.reserve(state.size() + add_cells.size());
+    to.reserve(state.size() + add_cells.size());
+
     for (const auto& cell : state) {
         auto new_cell = cell;
-        new_cell.phase = life_stage::normal;
+        new_cell.phase = cz::life_stage::normal;
         from.push_back(new_cell);
 
         if (deletion_set.contains(cell.id)) {
             auto deleted = cell;
-            deleted.phase = life_stage::dying;
+            deleted.phase = cz::life_stage::dying;
             to.push_back(deleted);
         }
         else {
@@ -762,10 +916,10 @@ cz::cyto_state_transition cz::generate_transition(
 
     for (const auto& new_cell : add_cells) {
         auto addee = new_cell;
-        addee.phase = life_stage::new_born;
+        addee.phase = cz::life_stage::new_born;
         from.push_back(addee);
 
-        addee.phase = life_stage::normal;
+        addee.phase = cz::life_stage::normal;
         to.push_back(addee);
     }
 
@@ -785,13 +939,13 @@ cz::cyto_state_transition cz::generate_transition(
 }
 
 cz::state_table_result cz::apply_state_tables(
-    cell_id_source& id_source,
-    const cyto_state& current_state,
-    const state_table& cell_tbl,
-    const neighborhood_indexer& cell_indexer,
-    const state_table_row& vert_tbl,
-    const neighborhood_indexer& vert_indexer,
-    const color_table& palette)
+    cz::cell_id_source& id_source,
+    const cz::cyto_state& current_state,
+    const cz::state_table& cell_tbl,
+    const cz::neighborhood_indexer& cell_indexer,
+    const cz::state_table_row& vert_tbl,
+    const cz::neighborhood_indexer& vert_indexer,
+    const cz::color_table& palette)
 {
     const auto snapshot = build_topology_snapshot(current_state);
 
@@ -812,13 +966,18 @@ cz::state_table_result cz::apply_state_tables(
 
     for (const auto& new_cell : add_list) {
         auto canonical_cell = new_cell;
-        canonical_cell.phase = life_stage::normal;
+        canonical_cell.phase = cz::life_stage::normal;
         next_state.push_back(canonical_cell);
     }
 
     relax_cyto_state(next_state, {});
 
-    auto trans = generate_transition(current_state, next_state, delete_list, add_list);
+    auto trans = cz::generate_transition(
+        current_state,
+        next_state,
+        delete_list,
+        add_list
+    );
 
     const auto current_scale_by_id = make_scale_map(current_state);
     const auto next_scale_by_id = make_scale_map(next_state);
@@ -839,7 +998,7 @@ cz::state_table_result cz::apply_state_tables(
 
     return {
         next_state,
-        to_cyto_frame(trans.from, palette, from_scales),
-        to_cyto_frame(trans.to, palette, to_scales)
+        cz::to_cyto_frame(trans.from, palette, from_scales),
+        cz::to_cyto_frame(trans.to, palette, to_scales)
     };
 }

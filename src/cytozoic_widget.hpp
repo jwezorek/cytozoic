@@ -5,6 +5,7 @@
 #include <QSize>
 #include <QTimer>
 #include <QWidget>
+
 #include "cytozoic.hpp"
 
 namespace cz {
@@ -36,6 +37,11 @@ namespace cz {
             const cyto_frame& to
         );
 
+        std::vector<cell_id> take_reclaimable_ids();
+
+    signals:
+        void transition_finished();
+
     protected:
         void paintEvent(QPaintEvent* event) override;
         void resizeEvent(QResizeEvent* event) override;
@@ -43,6 +49,7 @@ namespace cz {
     private:
         void ensure_framebuffer_matches_widget_size();
         void advance_animation();
+        void finish_transition();
 
         QImage framebuffer_;
         int animation_duration_ms_;
@@ -52,6 +59,7 @@ namespace cz {
         cyto_frame anim_end_;
         bool show_cell_nuclei_;
         QTimer animation_timer_;
+        std::vector<cell_id> reclaimable_ids_;
     };
 
-}
+} // namespace cz

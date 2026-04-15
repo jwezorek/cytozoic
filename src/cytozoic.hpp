@@ -57,6 +57,11 @@ namespace cz {
 
     cyto_state random_cyto_state(int num_cells, int num_states, cell_id_source& ids);
 
+    cyto_state initial_cyto_state(
+        const struct cyto_params& params,
+        cell_id_source& ids
+    );
+
     cyto_frame to_cyto_frame(
         const cyto_state& state,
         const color_table& palette,
@@ -67,6 +72,10 @@ namespace cz {
         std::span<const frame_cell> to,
         double t
     );
+
+    std::vector<cell_id> deleted_cell_ids(std::span<const frame_cell> frame);
+
+    cyto_frame remove_deleted_cells(std::span<const frame_cell> frame);
 
     using state_table_row = std::vector<int8_t>;
     using state_table = std::vector<state_table_row>;
@@ -88,7 +97,7 @@ namespace cz {
         cyto_frame anim_start;
         cyto_frame anim_end;
     };
-    
+
     state_table_result apply_state_tables(
         cell_id_source& id_source,
         const cyto_state& state,
