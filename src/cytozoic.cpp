@@ -109,11 +109,17 @@ namespace
 
         t = std::clamp(t, 0.0, 1.0);
 
+        const bool weight_is_growing = from.weight < to.weight;
+
+        const double weight_t = weight_is_growing
+            ? 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t) * (1.0 - t) * (1.0 - t)
+            : t;
+
         const double interpolated_weight =
-            from.weight + (to.weight - from.weight) * t;
+            from.weight + (to.weight - from.weight) * weight_t;
 
         const double scale =
-            (from.weight < to.weight) ? to.scale : from.scale;
+            weight_is_growing ? to.scale : from.scale;
 
         return {
             .id = from.id,
