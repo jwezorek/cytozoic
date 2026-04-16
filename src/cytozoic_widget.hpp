@@ -16,7 +16,7 @@ namespace cz {
     public:
         explicit cytozoic_widget(
             QWidget* parent = nullptr,
-            int animation_duration_ms = 5000,
+            int animation_duration_ms = 500,
             int animation_frame_interval_ms = 16
         );
 

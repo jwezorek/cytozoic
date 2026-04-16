@@ -368,7 +368,7 @@ namespace
                 state[i].id,
                 polygon_scale(polygons[i])
             );
-
+            
             if (!inserted) {
                 throw std::runtime_error(
                     "make_scale_map: duplicate cell id."
