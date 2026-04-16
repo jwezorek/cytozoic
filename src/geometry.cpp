@@ -27,9 +27,9 @@ namespace {
 
 std::vector<cz::point> cz::random_points(
         size_t n,
+        std::optional<uint64_t> seed,
         double bounds_wd,
-        double bounds_hgt,
-        std::optional<uint64_t> seed) {
+        double bounds_hgt) {
 
     if (n == 0 || bounds_wd <= 0.0 || bounds_hgt <= 0.0) {
         return {};

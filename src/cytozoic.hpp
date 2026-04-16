@@ -2,6 +2,7 @@
 
 #include "geometry.hpp"
 #include "neighborhood_indexer.hpp"
+#include <optional>
 
 /*------------------------------------------------------------------------------------------------*/
 
@@ -55,7 +56,10 @@ namespace cz {
         std::vector<cell_id> free_ids_;
     };
 
-    cyto_state random_cyto_state(int num_cells, int num_states, cell_id_source& ids);
+    cyto_state random_cyto_state(
+        int num_cells, int num_states, cell_id_source& ids,
+        std::optional<uint64_t> seed = {}
+    );
 
     cyto_state initial_cyto_state(
         const struct cyto_params& params,
@@ -88,7 +92,7 @@ namespace cz {
     cyto_state_transition generate_transition(
         const cyto_state& state,
         const cyto_state& next_state,
-        const std::vector<cell_id>& delete_cells,
+        const std::unordered_set<cz::cell_id>& deleted_set,
         const std::vector<cell_state> add_cells
     );
 

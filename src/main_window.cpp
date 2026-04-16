@@ -1404,7 +1404,7 @@ void cz::main_window::on_transition_finished()
 }
 
 void cz::main_window::run_debug_demo()
-{
+{   /*
     try {
         cz::cell_id_source ids;
         auto current_state = cz::random_cyto_state(500, 4, ids);
@@ -1536,7 +1536,7 @@ void cz::main_window::run_debug_demo()
             tr("Debug"),
             tr("Debug run failed:\n%1").arg(QString::fromUtf8(ex.what()))
         );
-    }
+    } */
 }
 
 bool cz::main_window::load_ruleset_from_file(const QString& file_path)

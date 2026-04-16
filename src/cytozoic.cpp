@@ -171,15 +171,18 @@ namespace
         return map;
     }
 
-    int8_t random_cell_state(int num_states)
-    {
+    int8_t random_cell_state(
+            int num_states,
+            std::optional<uint64_t> seed = std::nullopt) {
         if (num_states <= 0) {
-            throw std::invalid_argument("random_cell_state: num_states must be positive.");
+            throw std::invalid_argument(
+                "random_cell_state: num_states must be positive."
+            );
         }
 
-        static thread_local std::mt19937 rng(std::random_device{}());
-        std::uniform_int_distribution<int> dist(0, num_states - 1);
+        auto rng = make_rng(seed);
 
+        std::uniform_int_distribution<int> dist(0, num_states - 1);
         return static_cast<int8_t>(dist(rng));
     }
 
@@ -221,11 +224,12 @@ namespace
         return result;
     }
 
-    int8_t sample_state_from_density(const std::vector<double>& density)
-    {
-        static thread_local std::mt19937 rng(std::random_device{}());
-        std::discrete_distribution<int> dist(density.begin(), density.end());
+    int8_t sample_state_from_density(
+        const std::vector<double>& density,
+        std::optional<uint64_t> seed = std::nullopt) {
+        auto rng = make_rng(seed);
 
+        std::discrete_distribution<int> dist(density.begin(), density.end());
         return static_cast<int8_t>(dist(rng));
     }
 
@@ -497,18 +501,17 @@ namespace
         }
     }
 
-    std::tuple<cz::cyto_state, std::vector<cz::cell_id>> apply_cell_table(
-        const cell_graph& graph,
-        const cz::state_table& cell_tbl,
-        const cz::neighborhood_indexer& cell_indexer)
-    {
+    std::tuple<cz::cyto_state, std::unordered_set<cz::cell_id>> apply_cell_table(
+            const cell_graph& graph,
+            const cz::state_table& cell_tbl,
+            const cz::neighborhood_indexer& cell_indexer) {
+
         cz::cyto_state next;
-        std::vector<cz::cell_id> delete_list;
+        std::unordered_set<cz::cell_id> deleted_set;
 
         next.reserve(graph.size());
 
         for (const auto& [id, cell] : graph) {
-            (void)id;
 
             if (cell.state < 0) {
                 throw std::runtime_error(
@@ -524,11 +527,11 @@ namespace
                 );
             }
 
-            const auto neighborhood = cell.neighbors
-                | rv::transform([&](cz::cell_id neighbor_id) -> int8_t {
-                return graph.at(neighbor_id).state;
-                    })
-                | r::to<std::vector>();
+            const auto neighborhood = cell.neighbors | rv::transform(
+                    [&](cz::cell_id neighbor_id) -> int8_t {
+                        return graph.at(neighbor_id).state;
+                    }
+                ) | r::to<std::vector>();
 
             const std::size_t column =
                 cell_indexer->column_index(neighborhood, cell_tbl.size());
@@ -540,22 +543,21 @@ namespace
             }
 
             const int8_t new_state = cell_tbl[state_index][column];
-
-            next.push_back(
-                cz::cell_state{
-                    .id = cell.id,
-                    .site = cell.site,
-                    .state = new_state >= 0 ? new_state : cell.state,
-                    .phase = cz::life_stage::normal
-                }
-            );
-
-            if (new_state < 0) {
-                delete_list.push_back(cell.id);
+            if (new_state >= 0) {
+                next.push_back(   
+                    cz::cell_state{
+                        .id = cell.id,
+                        .site = cell.site,
+                        .state = new_state,
+                        .phase = cz::life_stage::normal
+                    }
+                );
+            } else {
+                deleted_set.insert(cell.id);
             }
         }
 
-        return { next, delete_list };
+        return { next, deleted_set };
     }
 
     std::vector<cz::cell_state> apply_vertex_table(
@@ -606,31 +608,34 @@ namespace
 /*------------------------------------------------------------------------------------------------*/
 
 cz::cyto_state cz::random_cyto_state(
-    int num_cells,
-    int num_states,
-    cz::cell_id_source& ids)
-{
+        int num_cells,
+        int num_states,
+        cz::cell_id_source& ids,
+        std::optional<uint64_t> seed) {
+
     if (num_cells <= 0) {
         return {};
     }
 
     const auto sites = perform_lloyd_relaxation(
-        random_points(static_cast<std::size_t>(num_cells)),
+        random_points(static_cast<std::size_t>(num_cells), seed),
         k_lloyd_min_delta,
         k_max_iterations
     );
 
-    return sites
-        | rv::transform([&ids, num_states](const auto& pt) -> cz::cell_state {
-        return {
-            .id = ids.acquire(),
-            .site = pt,
-            .state = random_cell_state(num_states),
-            .phase = cz::life_stage::normal
-        };
-            })
-        | r::to<std::vector>();
+    return sites | rv::transform(
+            [&ids, num_states, seed](const auto& pt) -> cz::cell_state {
+                return {
+                    .id = ids.acquire(),
+                    .site = pt,
+                    .state = random_cell_state(num_states, seed),
+                    .phase = cz::life_stage::normal
+                };
+            }
+        ) | r::to<std::vector>();
 }
+
+std::optional<uint64_t> g_debug_seed = {};
 
 cz::cyto_state cz::initial_cyto_state(
     const cz::cyto_params& params,
@@ -647,7 +652,7 @@ cz::cyto_state cz::initial_cyto_state(
     }
 
     const auto sites = cz::perform_lloyd_relaxation(
-        cz::random_points(static_cast<std::size_t>(params.num_initial_cells)),
+        cz::random_points(static_cast<std::size_t>(params.num_initial_cells), g_debug_seed),
         k_lloyd_min_delta,
         k_max_iterations
     );
@@ -665,7 +670,7 @@ cz::cyto_state cz::initial_cyto_state(
             cz::cell_state{
                 .id = ids.acquire(),
                 .site = site,
-                .state = sample_state_from_density(density),
+                .state = sample_state_from_density(density, g_debug_seed),
                 .phase = cz::life_stage::normal
             }
         );
@@ -888,39 +893,59 @@ cz::cyto_frame cz::interpolate_cyto_frames(
 cz::cyto_state_transition cz::generate_transition(
     const cz::cyto_state& state,
     const cz::cyto_state& next_state,
-    const std::vector<cz::cell_id>& delete_cells,
-    const std::vector<cz::cell_state> add_cells)
-{
+    const std::unordered_set<cz::cell_id>& deletion_set,
+    const std::vector<cz::cell_state> add_cells) {
+
+    std::unordered_map<cz::cell_id, const cz::cell_state*> next_by_id;
+    next_by_id.reserve(next_state.size());
+
+    for (const auto& cell : next_state) {
+        auto [it, inserted] = next_by_id.emplace(cell.id, &cell);
+        if (!inserted) {
+            throw std::runtime_error(
+                "generate_transition: duplicate cell id in next_state."
+            );
+        }
+    }
+
     cz::cyto_state from;
     cz::cyto_state to;
-
-    const auto deletion_set = delete_cells | r::to<std::unordered_set>();
 
     from.reserve(state.size() + add_cells.size());
     to.reserve(state.size() + add_cells.size());
 
     for (const auto& cell : state) {
-        auto new_cell = cell;
-        new_cell.phase = cz::life_stage::normal;
-        from.push_back(new_cell);
+        auto from_cell = cell;
+        from_cell.phase = cz::life_stage::normal;
+        from.push_back(from_cell);
 
         if (deletion_set.contains(cell.id)) {
-            auto deleted = cell;
-            deleted.phase = cz::life_stage::dying;
-            to.push_back(deleted);
+            auto to_cell = cell;
+            to_cell.phase = cz::life_stage::dying;
+            to.push_back(to_cell);
         }
         else {
-            to.push_back(new_cell);
+            auto it = next_by_id.find(cell.id);
+            if (it == next_by_id.end()) {
+                throw std::runtime_error(
+                    "generate_transition: surviving cell missing from next_state."
+                );
+            }
+
+            auto to_cell = *it->second;
+            to_cell.phase = cz::life_stage::normal;
+            to.push_back(to_cell);
         }
     }
 
     for (const auto& new_cell : add_cells) {
-        auto addee = new_cell;
-        addee.phase = cz::life_stage::new_born;
-        from.push_back(addee);
+        auto from_cell = new_cell;
+        from_cell.phase = cz::life_stage::new_born;
+        from.push_back(from_cell);
 
-        addee.phase = cz::life_stage::normal;
-        to.push_back(addee);
+        auto to_cell = new_cell;
+        to_cell.phase = cz::life_stage::normal;
+        to.push_back(to_cell);
     }
 
     const auto current_scale_by_id = make_scale_map(state);
@@ -937,19 +962,18 @@ cz::cyto_state_transition cz::generate_transition(
 
     return { from, to };
 }
-
 cz::state_table_result cz::apply_state_tables(
-    cz::cell_id_source& id_source,
-    const cz::cyto_state& current_state,
-    const cz::state_table& cell_tbl,
-    const cz::neighborhood_indexer& cell_indexer,
-    const cz::state_table_row& vert_tbl,
-    const cz::neighborhood_indexer& vert_indexer,
-    const cz::color_table& palette)
-{
+        cz::cell_id_source& id_source,
+        const cz::cyto_state& current_state,
+        const cz::state_table& cell_tbl,
+        const cz::neighborhood_indexer& cell_indexer,
+        const cz::state_table_row& vert_tbl,
+        const cz::neighborhood_indexer& vert_indexer,
+        const cz::color_table& palette) {
+
     const auto snapshot = build_topology_snapshot(current_state);
 
-    auto [next_state, delete_list] = apply_cell_table(
+    auto [next_state, delete_set] = apply_cell_table(
         snapshot.graph,
         cell_tbl,
         cell_indexer
@@ -975,7 +999,7 @@ cz::state_table_result cz::apply_state_tables(
     auto trans = cz::generate_transition(
         current_state,
         next_state,
-        delete_list,
+        delete_set,
         add_list
     );
 
