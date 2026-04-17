@@ -22,10 +22,49 @@ namespace {
 
         pro::make_proxy<cz::neighborhood_indexer_facade>(
             cz::max_state_indexer{}
+        ),
+
+        pro::make_proxy<cz::neighborhood_indexer_facade>(
+            cz::trinary_histogram_indexer{}
         )
     };
 
+    int to_trinary_digit(int count) {
+        if (count <= 1) {
+            return 0;
+        }
+        else if (count <= 3) {
+            return 1;
+        }
+
+        return 2;
+    }
+
+    std::size_t three_to_nth(std::size_t n) {
+        std::size_t value = 1;
+
+        for (std::size_t i = 0; i < n; ++i) {
+            value *= 3;
+        }
+
+        return value;
+    }
+
+    std::size_t trinary_to_integer(const std::vector<int>& digits) {
+        std::size_t value = 0;
+        std::size_t place = 1;
+
+        for (int digit : digits) {
+            value += static_cast<std::size_t>(digit) * place;
+            place *= 3;
+        }
+
+        return value;
+    }
+
 }
+
+/*------------------------------------------------------------------------------------------------*/
 
 cz::sum_of_states_indexer::sum_of_states_indexer(std::size_t max_neighbors)
     : max_neighbors_(max_neighbors)
@@ -86,6 +125,8 @@ std::string cz::sum_of_states_indexer::name() const
     return "sum of states";
 }
 
+/*------------------------------------------------------------------------------------------------*/
+
 std::size_t cz::max_state_indexer::column_index(
     const std::vector<int8_t>& neighbor_states,
     std::size_t num_states) const
@@ -135,6 +176,59 @@ std::size_t cz::max_state_indexer::num_columns( std::size_t num_states) const {
 std::string cz::max_state_indexer::name() const {
     return "max state";
 }
+
+/*------------------------------------------------------------------------------------------------*/
+
+std::size_t cz::trinary_histogram_indexer::column_index(
+        const std::vector<int8_t>& neighbor_states,
+        std::size_t num_states) const {
+    if (num_states == 0) {
+        throw std::runtime_error(
+            "trinary_histogram_indexer requires num_states > 0."
+        );
+    }
+
+    std::vector<int> histogram(num_states, 0);
+
+    for (int8_t s : neighbor_states) {
+        if (s < 0) {
+            throw std::runtime_error(
+                "trinary_histogram_indexer requires non-negative states."
+            );
+        }
+
+        const auto state = static_cast<std::size_t>(s);
+
+        if (state >= num_states) {
+            throw std::runtime_error(
+                "trinary_histogram_indexer received a state outside the valid range."
+            );
+        }
+
+        ++histogram[state];
+    }
+
+    const auto digits = histogram | rv::transform(to_trinary_digit) | r::to<std::vector>();
+
+    return trinary_to_integer(digits);
+}
+
+std::size_t cz::trinary_histogram_indexer::num_columns(
+    std::size_t num_states) const {
+    if (num_states == 0) {
+        throw std::runtime_error(
+            "trinary_histogram_indexer requires num_states > 0."
+        );
+    }
+
+    return three_to_nth(num_states);
+}
+
+std::string cz::trinary_histogram_indexer::name() const {
+    return "trinary histogram";
+}
+
+/*------------------------------------------------------------------------------------------------*/
 
 std::vector<std::string> cz::named_indexers() {
     return g_indexers | rv::transform(

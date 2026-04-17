@@ -553,19 +553,7 @@ namespace
     {
         const std::string value = name.toStdString();
 
-        if (value == "sum of states") {
-            return pro::make_proxy<cz::neighborhood_indexer_facade>(
-                cz::sum_of_states_indexer{ 10 }
-            );
-        }
-
-        if (value == "max state") {
-            return pro::make_proxy<cz::neighborhood_indexer_facade>(
-                cz::max_state_indexer{}
-            );
-        }
-
-        throw std::runtime_error("unknown neighborhood indexer name.");
+        return cz::indexer_from_name(value);
     }
 
     QString indexer_name_or_default(

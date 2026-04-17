@@ -58,6 +58,15 @@ namespace cz {
         std::string name() const;
     };
 
+    struct trinary_histogram_indexer {
+        std::size_t column_index(
+            const std::vector<int8_t>& neighbor_states,
+            std::size_t num_states) const;
+
+        std::size_t num_columns(std::size_t num_states) const;;
+        std::string name() const;
+    };
+
     std::vector<std::string> named_indexers();
     neighborhood_indexer indexer_from_name(const std::string& str);
 
