@@ -917,6 +917,7 @@ cz::main_window::~main_window() = default;
 
 void cz::main_window::set_params(const cyto_params& params) {
     params_ = params;
+    reset_simulation_session();
 }
 
 cz::cyto_params cz::main_window::get_params() const {
@@ -977,10 +978,10 @@ void cz::main_window::create_menus()
 
     cytozoic_menu->addSeparator();
 
-    QAction* run_simulation_action =
+    run_simulation_action_ =
         cytozoic_menu->addAction(tr("&Run Simulation"));
     QObject::connect(
-        run_simulation_action,
+        run_simulation_action_,
         &QAction::triggered,
         this,
         &cz::main_window::run_simulation
@@ -1294,34 +1295,38 @@ void cz::main_window::view_edit_current_start_conditions()
 void cz::main_window::run_simulation()
 {
     try {
+        if (simulation_running_) {
+            simulation_running_ = false;
+            update_run_action_text();
+            return;
+        }
+
         if (transition_in_flight_) {
             return;
         }
 
-        if (!simulation_initialized_) {
-            id_source_.reset();
-            current_state_ = cz::initial_cyto_state(params_, id_source_);
-            pending_next_state_.clear();
-            simulation_initialized_ = true;
+        id_source_.reset();
+        pending_next_state_.clear();
+        current_state_ = cz::initial_cyto_state(params_, id_source_);
+        simulation_initialized_ = true;
 
-            if (current_state_.empty()) {
-                canvas_->clear(Qt::black);
-                return;
-            }
-
-            canvas_->set_show_cell_nuceli(false);
-            canvas_->set(cz::to_cyto_frame(current_state_, params_.palette, {}));
+        if (current_state_.empty()) {
+            canvas_->clear(Qt::black);
+            simulation_running_ = false;
+            update_run_action_text();
+            return;
         }
 
-        simulation_running_ = !simulation_running_;
+        canvas_->set_show_cell_nuceli(false);
+        canvas_->set(cz::to_cyto_frame(current_state_, params_.palette, {}));
 
-        if (simulation_running_) {
-            advance_simulation();
-        }
+        simulation_running_ = true;
+        update_run_action_text();
+
+        advance_simulation();
     }
     catch (const std::exception& ex) {
-        simulation_running_ = false;
-        transition_in_flight_ = false;
+        reset_simulation_session(false);
 
         QMessageBox::critical(
             this,
@@ -1334,6 +1339,10 @@ void cz::main_window::run_simulation()
 void cz::main_window::advance_simulation()
 {
     if (!simulation_running_ || transition_in_flight_) {
+        return;
+    }
+
+    if (!simulation_initialized_) {
         return;
     }
 
@@ -1376,6 +1385,10 @@ void cz::main_window::advance_simulation()
         params_.palette
     );
 
+    if (!simulation_running_) {
+        return;
+    }
+
     pending_next_state_ = result.next_state;
     transition_in_flight_ = true;
 
@@ -1392,15 +1405,18 @@ void cz::main_window::on_transition_finished()
     pending_next_state_.clear();
     transition_in_flight_ = false;
 
-    if (simulation_running_) {
-        QTimer::singleShot(
-            0,
-            this,
-            [this]() {
-                advance_simulation();
-            }
-        );
+    if (!simulation_running_) {
+        update_run_action_text();
+        return;
     }
+
+    QTimer::singleShot(
+        0,
+        this,
+        [this]() {
+            advance_simulation();
+        }
+    );
 }
 
 void cz::main_window::run_debug_demo()
@@ -1600,14 +1616,6 @@ bool cz::main_window::load_ruleset_from_file(const QString& file_path)
         set_params(loaded);
         current_ruleset_path_ = file_path;
 
-        simulation_initialized_ = false;
-        simulation_running_ = false;
-        transition_in_flight_ = false;
-        current_state_.clear();
-        pending_next_state_.clear();
-        id_source_.reset();
-        canvas_->clear(Qt::black);
-
         return true;
     }
     catch (const std::exception& ex) {
@@ -1667,4 +1675,32 @@ bool cz::main_window::save_ruleset_to_file(const QString& file_path)
         );
         return false;
     }
+}
+
+void cz::main_window::reset_simulation_session(bool clear_canvas)
+{
+    simulation_initialized_ = false;
+    simulation_running_ = false;
+    transition_in_flight_ = false;
+
+    current_state_.clear();
+    pending_next_state_.clear();
+    id_source_.reset();
+
+    if (clear_canvas && canvas_ != nullptr) {
+        canvas_->clear(Qt::black);
+    }
+
+    update_run_action_text();
+}
+
+void cz::main_window::update_run_action_text()
+{
+    if (run_simulation_action_ == nullptr) {
+        return;
+    }
+
+    run_simulation_action_->setText(
+        simulation_running_ ? tr("S&top") : tr("&Run Simulation")
+    );
 }

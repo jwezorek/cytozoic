@@ -37,13 +37,19 @@ namespace cz {
         bool load_ruleset_from_file(const QString& file_path);
         bool save_ruleset_to_file(const QString& file_path);
 
+        void reset_simulation_session(bool clear_canvas = true);
+        void update_run_action_text();
+
         cytozoic_widget* canvas_ = nullptr;
+        QAction* run_simulation_action_ = nullptr;
+
         QString current_ruleset_path_;
         cyto_params params_;
 
         cell_id_source id_source_;
         cyto_state current_state_;
         cyto_state pending_next_state_;
+
         bool simulation_initialized_ = false;
         bool simulation_running_ = false;
         bool transition_in_flight_ = false;
