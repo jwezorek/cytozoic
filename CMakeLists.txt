@@ -30,7 +30,7 @@ add_executable(cytozoic
     src/geometry.cpp
     src/cytozoic.cpp
     src/neighborhood_indexer.cpp
-)
+ "src/rules_dialog.cpp")
 
 target_link_libraries(
     cytozoic PRIVATE 

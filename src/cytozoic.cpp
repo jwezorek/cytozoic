@@ -1026,3 +1026,14 @@ cz::state_table_result cz::apply_state_tables(
         cz::to_cyto_frame(trans.to, palette, to_scales)
     };
 }
+
+cz::cyto_params::cyto_params() :
+    cell_indexer{ indexer_from_name("sum of states")},
+    cell_state_table(1, state_table_row(1, 0)),
+    vertex_indexer{ indexer_from_name("sum of states") },
+    vertex_table(state_table_row(1, 0)),
+    num_states{ 1 },
+    num_initial_cells{10},
+    initial_state_density{1.0},
+    palette{1, {0,0,0}}
+{}

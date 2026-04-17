@@ -121,6 +121,8 @@ namespace cz {
         int num_initial_cells;
         std::vector<double> initial_state_density;
         color_table palette;
+
+        cyto_params();
     };
 
 }
