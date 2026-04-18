@@ -1,42 +1,11 @@
 #include "main_window.hpp"
 #include "rules_dialog.hpp"
-#include "third-party/json.hpp"
 #include "cytozoic.hpp"
-#include "voronoi.hpp"
-
-#include <QDialog>
-#include <QDialogButtonBox>
-#include <QFile>
-#include <QFileDialog>
-#include <QMenu>
-#include <QMenuBar>
-#include <QMessageBox>
-#include <QVBoxLayout>
-
-#include <QColorDialog>
-#include <QComboBox>
-#include <QGridLayout>
-#include <QHeaderView>
-#include <QHBoxLayout>
-#include <QLabel>
-#include <QPushButton>
-#include <QSignalBlocker>
-#include <QSlider>
-#include <QSpinBox>
-#include <QTabWidget>
-#include <QTableWidget>
-#include <QWidget>
-
-#include <algorithm>
-#include <cmath>
-#include <numbers>
-#include <ranges>
+#include "serialize.hpp"
 #include <stdexcept>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
-#include <fstream>
+#include <ranges>
 
 namespace r = std::ranges;
 namespace rv = std::ranges::views;
@@ -45,168 +14,6 @@ namespace
 {
     constexpr double k_lloyd_min_delta = 0.001;
     constexpr int k_max_iterations = 20;
-
-    double polygon_area(const cz::polygon& poly)
-    {
-        if (poly.size() < 3) {
-            return 0.0;
-        }
-
-        double area2 = 0.0;
-
-        for (std::size_t i = 0; i < poly.size(); ++i) {
-            const cz::point& a = poly[i];
-            const cz::point& b = poly[(i + 1) % poly.size()];
-            area2 += a.x * b.y - b.x * a.y;
-        }
-
-        return std::abs(area2) * 0.5;
-    }
-
-    double polygon_scale(const cz::polygon& poly)
-    {
-        constexpr double k_min_scale = 1e-9;
-
-        return std::max(
-            polygon_area(poly) / std::numbers::pi_v<double>,
-            k_min_scale
-        );
-    }
-
-    std::unordered_map<cz::cell_id, double> make_scale_map(
-        const cz::cyto_state& state)
-    {
-        std::unordered_map<cz::cell_id, double> scale_by_id;
-        scale_by_id.reserve(state.size());
-
-        if (state.empty()) {
-            return scale_by_id;
-        }
-
-        const auto sites = state
-            | rv::transform([](const cz::cell_state& cell) -> cz::point {
-            return cell.site;
-                })
-            | r::to<std::vector>();
-
-        const auto polygons = cz::to_voronoi_polygons(sites);
-
-        if (polygons.size() != state.size()) {
-            throw std::runtime_error(
-                "make_scale_map: polygon count did not match state size."
-            );
-        }
-
-        for (std::size_t i = 0; i < state.size(); ++i) {
-            auto [it, inserted] = scale_by_id.emplace(
-                state[i].id,
-                polygon_scale(polygons[i])
-            );
-
-            if (!inserted) {
-                throw std::runtime_error("make_scale_map: duplicate cell id.");
-            }
-        }
-
-        return scale_by_id;
-    }
-
-    std::vector<double> make_from_scales(
-        const cz::cyto_state& from_state,
-        const std::unordered_map<cz::cell_id, double>& current_scale_by_id,
-        const std::unordered_map<cz::cell_id, double>& next_scale_by_id)
-    {
-        std::vector<double> scales;
-        scales.reserve(from_state.size());
-
-        for (const auto& cell : from_state) {
-            if (cell.phase == cz::life_stage::new_born) {
-                auto it = next_scale_by_id.find(cell.id);
-                if (it == next_scale_by_id.end()) {
-                    throw std::runtime_error(
-                        "make_from_scales: missing next scale for newborn cell."
-                    );
-                }
-
-                scales.push_back(it->second);
-            }
-            else {
-                auto it = current_scale_by_id.find(cell.id);
-                if (it == current_scale_by_id.end()) {
-                    throw std::runtime_error(
-                        "make_from_scales: missing current scale for existing cell."
-                    );
-                }
-
-                scales.push_back(it->second);
-            }
-        }
-
-        return scales;
-    }
-
-    std::vector<double> make_to_scales(
-        const cz::cyto_state& to_state,
-        const std::unordered_map<cz::cell_id, double>& current_scale_by_id,
-        const std::unordered_map<cz::cell_id, double>& next_scale_by_id)
-    {
-        std::vector<double> scales;
-        scales.reserve(to_state.size());
-
-        for (const auto& cell : to_state) {
-            if (cell.phase == cz::life_stage::dying) {
-                auto it = current_scale_by_id.find(cell.id);
-                if (it == current_scale_by_id.end()) {
-                    throw std::runtime_error(
-                        "make_to_scales: missing current scale for dying cell."
-                    );
-                }
-
-                scales.push_back(it->second);
-            }
-            else {
-                auto it = next_scale_by_id.find(cell.id);
-                if (it == next_scale_by_id.end()) {
-                    throw std::runtime_error(
-                        "make_to_scales: missing next scale for non-dying cell."
-                    );
-                }
-
-                scales.push_back(it->second);
-            }
-        }
-
-        return scales;
-    }
-
-    void relax_state_unweighted(cz::cyto_state& state)
-    {
-        if (state.empty()) {
-            return;
-        }
-
-        const auto sites = state
-            | rv::transform([](const cz::cell_state& cell) -> cz::point {
-            return cell.site;
-                })
-            | r::to<std::vector>();
-
-        const auto relaxed_sites = cz::perform_lloyd_relaxation(
-            sites,
-            k_lloyd_min_delta,
-            k_max_iterations
-        );
-
-        if (relaxed_sites.size() != state.size()) {
-            throw std::runtime_error(
-                "relax_state_unweighted: relaxed site count mismatch."
-            );
-        }
-
-        for (auto&& [cell, site] : rv::zip(state, relaxed_sites)) {
-            cell.site = site;
-        }
-    }
 
     void show_empty_modal_dialog(QWidget* parent, const QString& title)
     {
@@ -227,136 +34,6 @@ namespace
         layout->addWidget(buttons);
 
         dialog.exec();
-    }
-
-
-
-    using json = nlohmann::json;
-
-    json color_to_json(const cz::color& color)
-    {
-        return json{
-            { "r", color.r },
-            { "g", color.g },
-            { "b", color.b }
-        };
-    }
-
-    cz::color color_from_json(const json& j)
-    {
-        return cz::color{
-            static_cast<uint8_t>(j.at("r").get<int>()),
-            static_cast<uint8_t>(j.at("g").get<int>()),
-            static_cast<uint8_t>(j.at("b").get<int>())
-        };
-    }
-
-    json state_table_row_to_json(const cz::state_table_row& row)
-    {
-        json j = json::array();
-
-        for (int8_t value : row) {
-            j.push_back(static_cast<int>(value));
-        }
-
-        return j;
-    }
-
-    cz::state_table_row state_table_row_from_json(const json& j)
-    {
-        if (!j.is_array()) {
-            throw std::runtime_error("state table row must be a JSON array.");
-        }
-
-        cz::state_table_row row;
-        row.reserve(j.size());
-
-        for (const auto& value : j) {
-            row.push_back(static_cast<int8_t>(value.get<int>()));
-        }
-
-        return row;
-    }
-
-    json state_table_to_json(const cz::state_table& table)
-    {
-        json j = json::array();
-
-        for (const auto& row : table) {
-            j.push_back(state_table_row_to_json(row));
-        }
-
-        return j;
-    }
-
-    cz::state_table state_table_from_json(const json& j)
-    {
-        if (!j.is_array()) {
-            throw std::runtime_error("state table must be a JSON array.");
-        }
-
-        cz::state_table table;
-        table.reserve(j.size());
-
-        for (const auto& row : j) {
-            table.push_back(state_table_row_from_json(row));
-        }
-
-        return table;
-    }
-
-    std::vector<double> double_vector_from_json(const json& j)
-    {
-        if (!j.is_array()) {
-            throw std::runtime_error("expected a JSON array of numbers.");
-        }
-
-        std::vector<double> values;
-        values.reserve(j.size());
-
-        for (const auto& value : j) {
-            values.push_back(value.get<double>());
-        }
-
-        return values;
-    }
-
-    json double_vector_to_json(const std::vector<double>& values)
-    {
-        json j = json::array();
-
-        for (double value : values) {
-            j.push_back(value);
-        }
-
-        return j;
-    }
-
-    cz::color_table color_table_from_json(const json& j)
-    {
-        if (!j.is_array()) {
-            throw std::runtime_error("palette must be a JSON array.");
-        }
-
-        cz::color_table palette;
-        palette.reserve(j.size());
-
-        for (const auto& value : j) {
-            palette.push_back(color_from_json(value));
-        }
-
-        return palette;
-    }
-
-    json color_table_to_json(const cz::color_table& palette)
-    {
-        json j = json::array();
-
-        for (const auto& color : palette) {
-            j.push_back(color_to_json(color));
-        }
-
-        return j;
     }
 
     void validate_loaded_params(const cz::cyto_params& params)
@@ -496,15 +173,6 @@ void cz::main_window::create_menus()
         &QAction::triggered,
         this,
         &cz::main_window::run_simulation
-    );
-
-    QAction* debug_action =
-        cytozoic_menu->addAction(tr("&Debug"));
-    QObject::connect(
-        debug_action,
-        &QAction::triggered,
-        this,
-        &cz::main_window::run_debug_demo
     );
 }
 
@@ -697,262 +365,34 @@ void cz::main_window::on_transition_finished()
     );
 }
 
-void cz::main_window::run_debug_demo()
-{   /*
-    try {
-        cz::cell_id_source ids;
-        auto current_state = cz::random_cyto_state(500, 4, ids);
+bool cz::main_window::load_ruleset_from_file(const QString& file_path) {
 
-        for (auto& cell : current_state) {
-            cell.state = 0;
-            cell.phase = cz::life_stage::normal;
-        }
-
-        const std::vector<std::size_t> delete_indices = {
-            5, 17, 42, 80, 111, 150, 222, 301
-        };
-
-        std::vector<cz::cell_id> delete_list;
-        delete_list.reserve(delete_indices.size());
-
-        for (std::size_t index : delete_indices) {
-            if (index >= current_state.size()) {
-                throw std::runtime_error(
-                    "run_debug_demo: delete index out of range."
-                );
-            }
-
-            delete_list.push_back(current_state[index].id);
-            current_state[index].state = 2;
-        }
-
-        const auto current_sites = current_state
-            | rv::transform([](const cz::cell_state& cell) -> cz::point {
-            return cell.site;
-                })
-            | r::to<std::vector>();
-
-        const auto diagram = cz::to_voronoi_diagram(current_sites);
-
-        std::vector<cz::cell_state> add_list;
-        add_list.reserve(8);
-
-        constexpr std::size_t num_to_add = 8;
-
-        if (!diagram.embedding.vertices.empty()) {
-            const std::size_t step = std::max<std::size_t>(
-                1,
-                diagram.embedding.vertices.size() / num_to_add
-            );
-
-            for (std::size_t i = 0;
-                i < diagram.embedding.vertices.size() &&
-                add_list.size() < num_to_add;
-                i += step) {
-                add_list.push_back(
-                    cz::cell_state{
-                        .id = ids.acquire(),
-                        .site = diagram.embedding.vertices[i],
-                        .state = 1,
-                        .phase = cz::life_stage::new_born
-                    }
-                );
-            }
-        }
-
-        const auto deletion_set = delete_list | r::to<std::unordered_set>();
-
-        cz::cyto_state next_state;
-        next_state.reserve(
-            current_state.size() - delete_list.size() + add_list.size()
-        );
-
-        for (const auto& cell : current_state) {
-            if (deletion_set.contains(cell.id)) {
-                continue;
-            }
-
-            auto survivor = cell;
-            survivor.phase = cz::life_stage::normal;
-            survivor.state = 0;
-            next_state.push_back(survivor);
-        }
-
-        for (const auto& new_cell : add_list) {
-            auto canonical_birth = new_cell;
-            canonical_birth.phase = cz::life_stage::normal;
-            next_state.push_back(canonical_birth);
-        }
-
-        relax_state_unweighted(next_state);
-
-        const auto trans = cz::generate_transition(
-            current_state,
-            next_state,
-            delete_list,
-            add_list
-        );
-
-        const auto current_scale_by_id = make_scale_map(current_state);
-        const auto next_scale_by_id = make_scale_map(next_state);
-
-        const auto from_scales = make_from_scales(
-            trans.from,
-            current_scale_by_id,
-            next_scale_by_id
-        );
-
-        const auto to_scales = make_to_scales(
-            trans.to,
-            current_scale_by_id,
-            next_scale_by_id
-        );
-
-        cz::color_table palette = {
-            {0, 255, 0},
-            {255, 0, 0},
-            {255, 255, 130},
-            {0, 60, 200}
-        };
-
-        canvas_->set_show_cell_nuceli(false);
-
-        const auto initial_frame = cz::to_cyto_frame(current_state, palette, {});
-        const auto from_frame = cz::to_cyto_frame(trans.from, palette, from_scales);
-        const auto to_frame = cz::to_cyto_frame(trans.to, palette, to_scales);
-
-        canvas_->set(initial_frame);
-        canvas_->start_transition(from_frame, to_frame);
-    }
-    catch (const std::exception& ex) {
-        QMessageBox::critical(
-            this,
-            tr("Debug"),
-            tr("Debug run failed:\n%1").arg(QString::fromUtf8(ex.what()))
-        );
-    } */
-}
-
-bool cz::main_window::load_ruleset_from_file(const QString& file_path)
-{
-    try {
-        std::ifstream file(file_path.toStdString(), std::ios::binary);
-
-        if (!file) {
-            QMessageBox::critical(
-                this,
-                tr("Open Ruleset"),
-                tr("Could not open file:\n%1").arg(file_path)
-            );
-            return false;
-        }
-
-        const json j = json::parse(file);
-
-        if (!j.is_object()) {
-            throw std::runtime_error(
-                "ruleset file must contain a top-level JSON object."
-            );
-        }
-
-        const std::string format = j.value("format", std::string{});
-        const int version = j.value("version", 0);
-
-        if (format != "cytozoic_ruleset") {
-            throw std::runtime_error("unrecognized ruleset format.");
-        }
-
-        if (version != 1) {
-            throw std::runtime_error("unsupported ruleset version.");
-        }
-
-        cz::cyto_params loaded;
-
-        loaded.num_states = j.at("num_states").get<int>();
-        loaded.num_initial_cells = j.at("num_initial_cells").get<int>();
-        loaded.initial_state_density =
-            double_vector_from_json(j.at("initial_state_density"));
-        loaded.palette =
-            color_table_from_json(j.at("palette"));
-
-        loaded.cell_indexer = cz::indexer_from_name(
-            j.at("cell_indexer").get<std::string>()
-        );
-
-        loaded.vertex_indexer = cz::indexer_from_name(
-            j.at("vertex_indexer").get<std::string>()
-        );
-
-        loaded.cell_state_table =
-            state_table_from_json(j.at("cell_state_table"));
-
-        loaded.vertex_table =
-            state_table_row_from_json(j.at("vertex_table"));
-
-        validate_loaded_params(loaded);
-
-        set_params(loaded);
-        current_ruleset_path_ = file_path;
-
-        return true;
-    }
-    catch (const std::exception& ex) {
+    auto loaded = cz::load_ruleset_from_file( file_path.toStdString() );
+    if (!loaded) {
         QMessageBox::critical(
             this,
             tr("Open Ruleset"),
-            tr("Failed to load ruleset from:\n%1\n\n%2")
-            .arg(file_path, QString::fromUtf8(ex.what()))
+            tr("Could not open file:\n%1").arg(file_path)
         );
         return false;
     }
+    set_params( *loaded );
+    return true;
+
 }
 
-bool cz::main_window::save_ruleset_to_file(const QString& file_path)
-{
-    try {
-        const cz::cyto_params params = get_params();
+bool cz::main_window::save_ruleset_to_file(const QString& file_path) {
 
-        validate_loaded_params(params);
-
-        json j = {
-            { "format", "cytozoic_ruleset" },
-            { "version", 1 },
-            { "num_states", params.num_states },
-            { "num_initial_cells", params.num_initial_cells },
-            { "initial_state_density", double_vector_to_json(params.initial_state_density) },
-            { "palette", color_table_to_json(params.palette) },
-            { "cell_indexer", params.cell_indexer->name() },
-            { "cell_state_table", state_table_to_json(params.cell_state_table) },
-            { "vertex_indexer", params.vertex_indexer->name() },
-            { "vertex_table", state_table_row_to_json(params.vertex_table) }
-        };
-
-        std::ofstream file(file_path.toStdString(), std::ios::binary | std::ios::trunc);
-
-        if (!file) {
-            QMessageBox::critical(
-                this,
-                tr("Save Ruleset"),
-                tr("Could not write file:\n%1").arg(file_path)
-            );
-            return false;
-        }
-
-        file << j.dump(4);
-        file.close();
-
-        current_ruleset_path_ = file_path;
-        return true;
-    }
-    catch (const std::exception& ex) {
+    auto result = cz::save_ruleset_to_file(file_path.toStdString(), get_params());
+    if (!result) {
         QMessageBox::critical(
             this,
             tr("Save Ruleset"),
-            tr("Failed to save ruleset to:\n%1\n\n%2")
-            .arg(file_path, QString::fromUtf8(ex.what()))
+            tr("Could not write file:\n%1").arg(file_path)
         );
         return false;
     }
+    return true;
 }
 
 void cz::main_window::reset_simulation_session(bool clear_canvas)
