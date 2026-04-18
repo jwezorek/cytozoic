@@ -27,9 +27,7 @@ namespace cz {
         void save_ruleset();
         void save_ruleset_as();
         void view_edit_current_rules();
-        void view_edit_current_start_conditions();
         void run_simulation();
-        void run_debug_demo();
 
         void advance_simulation();
         void on_transition_finished();

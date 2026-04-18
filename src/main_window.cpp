@@ -15,27 +15,6 @@ namespace
     constexpr double k_lloyd_min_delta = 0.001;
     constexpr int k_max_iterations = 20;
 
-    void show_empty_modal_dialog(QWidget* parent, const QString& title)
-    {
-        QDialog dialog(parent);
-        dialog.setWindowTitle(title);
-        dialog.setModal(true);
-
-        auto* layout = new QVBoxLayout(&dialog);
-        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok, &dialog);
-
-        QObject::connect(
-            buttons,
-            &QDialogButtonBox::accepted,
-            &dialog,
-            &QDialog::accept
-        );
-
-        layout->addWidget(buttons);
-
-        dialog.exec();
-    }
-
     void validate_loaded_params(const cz::cyto_params& params)
     {
         if (params.num_states <= 0) {
@@ -229,12 +208,6 @@ void cz::main_window::view_edit_current_rules() {
 
     auto edited = dialog.get();
     set_params(edited);
-
-}
-
-void cz::main_window::view_edit_current_start_conditions() {
-
-    show_empty_modal_dialog(this, tr("Current Start Conditions"));
 
 }
 
