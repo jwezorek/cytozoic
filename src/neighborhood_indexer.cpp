@@ -30,6 +30,10 @@ namespace {
 
         pro::make_proxy<cz::neighborhood_indexer_facade>(
             cz::quarternary_histogram_indexer{}
+        ),
+
+        pro::make_proxy<cz::neighborhood_indexer_facade>(
+            cz::min_max_state_indexer{}
         )
     };
 
@@ -345,4 +349,67 @@ cz::neighborhood_indexer cz::indexer_from_name(const std::string& str)
     }
 
     return name_to_indexer.at(str);
+}
+
+std::size_t cz::min_max_state_indexer::column_index(
+    const std::vector<int8_t>& neighbor_states,
+    std::size_t num_states) const {
+    if (neighbor_states.empty()) {
+        throw std::runtime_error(
+            "min_max_state_indexer requires a non-empty state vector."
+        );
+    }
+
+    if (num_states == 0) {
+        throw std::runtime_error(
+            "min_max_state_indexer requires num_states > 0."
+        );
+    }
+
+    const auto [min_it, max_it] = std::minmax_element(
+        neighbor_states.begin(),
+        neighbor_states.end()
+    );
+
+    if (*min_it < 0 || *max_it < 0) {
+        throw std::runtime_error(
+            "min_max_state_indexer requires non-negative states."
+        );
+    }
+
+    const std::size_t min_state = static_cast<std::size_t>(*min_it);
+    const std::size_t max_state = static_cast<std::size_t>(*max_it);
+
+    if (max_state >= num_states) {
+        throw std::runtime_error(
+            "min_max_state_indexer received a state outside the valid range."
+        );
+    }
+
+    if (min_state > max_state) {
+        throw std::runtime_error(
+            "min_max_state_indexer computed invalid min/max ordering."
+        );
+    }
+
+    const std::size_t prefix =
+        min_state * num_states - (min_state * (min_state - 1)) / 2;
+
+    return prefix + (max_state - min_state);
+}
+
+std::size_t cz::min_max_state_indexer::num_columns(
+    std::size_t num_states) const {
+    if (num_states == 0) {
+        throw std::runtime_error(
+            "min_max_state_indexer requires num_states > 0."
+        );
+    }
+
+    return num_states * (num_states + 1) / 2;
+}
+
+std::string cz::min_max_state_indexer::name() const
+{
+    return "min/max state";
 }
