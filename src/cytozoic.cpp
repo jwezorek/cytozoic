@@ -236,9 +236,8 @@ namespace
         return static_cast<int8_t>(dist(rng));
     }
 
-    topology_snapshot build_topology_snapshot(
-        const std::vector<cz::cell_state>& live_cells)
-    {
+    topology_snapshot build_topology_snapshot( const std::vector<cz::cell_state>& live_cells) {
+
         topology_snapshot snapshot;
 
         if (live_cells.empty()) {
@@ -300,22 +299,33 @@ namespace
             }
         }
 
-        snapshot.vertex_neighborhoods.reserve(diagram.embedding.vertices.size());
+        std::vector<std::vector<cz::cell_id>> vertex_to_cells(
+            diagram.embedding.vertices.size()
+        );
+
+        for (std::size_t cell_index = 0;
+            cell_index < diagram.embedding.cells.size();
+            ++cell_index) {
+            const auto& polygon_vertices = diagram.embedding.cells[cell_index];
+            const cz::cell_id id = live_cells[cell_index].id;
+
+            for (std::size_t vertex_index : polygon_vertices) {
+                if (vertex_index >= vertex_to_cells.size()) {
+                    throw std::runtime_error(
+                        "build_topology_snapshot: vertex index out of range."
+                    );
+                }
+
+                vertex_to_cells[vertex_index].push_back(id);
+            }
+        }
+
+        snapshot.vertex_neighborhoods.reserve(vertex_to_cells.size());
 
         for (std::size_t vertex_index = 0;
-            vertex_index < diagram.embedding.vertices.size();
+            vertex_index < vertex_to_cells.size();
             ++vertex_index) {
-            std::vector<cz::cell_id> incident_cells;
-
-            for (std::size_t cell_index = 0;
-                cell_index < diagram.embedding.cells.size();
-                ++cell_index) {
-                const auto& polygon_vertices = diagram.embedding.cells[cell_index];
-
-                if (r::find(polygon_vertices, vertex_index) != polygon_vertices.end()) {
-                    incident_cells.push_back(live_cells[cell_index].id);
-                }
-            }
+            auto& incident_cells = vertex_to_cells[vertex_index];
 
             if (incident_cells.size() < 3) {
                 continue;
