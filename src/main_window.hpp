@@ -12,6 +12,12 @@ namespace cz {
 
     class simulation_thread;
 
+    enum class simulation_run_mode {
+        none,
+        animated,
+        quick
+    };
+
     class main_window : public QMainWindow {
         Q_OBJECT
 
@@ -29,9 +35,13 @@ namespace cz {
         void save_ruleset();
         void save_ruleset_as();
         void view_edit_current_rules();
+
         void run_simulation();
+        void run_simulation_quick();
+        void start_simulation(simulation_run_mode mode);
 
         void on_initial_frame_ready(const cyto_frame& frame);
+        void on_canonical_frame_ready(const cyto_frame& frame);
         void on_transition_ready(
             const cyto_frame& anim_start,
             const cyto_frame& anim_end
@@ -50,12 +60,14 @@ namespace cz {
         cytozoic_widget* canvas_ = nullptr;
         simulation_thread* simulation_thread_ = nullptr;
         QAction* run_simulation_action_ = nullptr;
+        QAction* run_simulation_quick_action_ = nullptr;
 
         QString current_ruleset_path_;
         cyto_params params_;
 
         bool simulation_running_ = false;
         bool transition_in_flight_ = false;
+        simulation_run_mode run_mode_ = simulation_run_mode::none;
     };
 
 } // namespace cz

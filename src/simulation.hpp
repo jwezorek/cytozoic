@@ -8,6 +8,11 @@
 
 namespace cz {
 
+    enum class simulation_presentation_mode {
+        animated,
+        quick
+    };
+
     class simulation_thread : public QThread {
         Q_OBJECT
 
@@ -15,12 +20,17 @@ namespace cz {
         explicit simulation_thread(QObject* parent = nullptr);
         ~simulation_thread() override;
 
-        void start_simulation(const cyto_params& params);
+        void start_simulation(
+            const cyto_params& params,
+            simulation_presentation_mode mode
+        );
+
         void request_stop();
         void notify_transition_finished();
 
     signals:
         void initial_frame_ready(cyto_frame frame);
+        void canonical_frame_ready(cyto_frame frame);
         void transition_ready(cyto_frame anim_start, cyto_frame anim_end);
         void simulation_failed(QString message);
         void simulation_stopped();
@@ -38,6 +48,9 @@ namespace cz {
         QWaitCondition condition_;
 
         cyto_params params_;
+        simulation_presentation_mode mode_ =
+            simulation_presentation_mode::animated;
+
         cell_id_source id_source_;
         cyto_state current_state_;
         std::vector<cell_id> pending_reclaim_ids_;

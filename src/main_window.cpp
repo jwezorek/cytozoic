@@ -13,8 +13,8 @@
 #include <stdexcept>
 #include <utility>
 
-namespace
-{
+namespace {
+
     void validate_loaded_params(const cz::cyto_params& params)
     {
         if (params.num_states <= 0) {
@@ -67,12 +67,13 @@ namespace
             );
         }
     }
+
 } // namespace
 
-cz::main_window::main_window(QWidget* parent) : 
-        QMainWindow(parent),
-        simulation_thread_(new cz::simulation_thread(this)) {
-
+cz::main_window::main_window(QWidget* parent)
+    : QMainWindow(parent),
+    simulation_thread_(new cz::simulation_thread(this))
+{
     setCentralWidget(canvas_ = new cytozoic_widget(this));
     create_menus();
     setWindowTitle(tr("cytozoic"));
@@ -90,6 +91,14 @@ cz::main_window::main_window(QWidget* parent) :
         &cz::simulation_thread::initial_frame_ready,
         this,
         &cz::main_window::on_initial_frame_ready,
+        Qt::QueuedConnection
+    );
+
+    connect(
+        simulation_thread_,
+        &cz::simulation_thread::canonical_frame_ready,
+        this,
+        &cz::main_window::on_canonical_frame_ready,
         Qt::QueuedConnection
     );
 
@@ -196,6 +205,15 @@ void cz::main_window::create_menus()
         this,
         &cz::main_window::run_simulation
     );
+
+    run_simulation_quick_action_ =
+        cytozoic_menu->addAction(tr("Run Simulation (&Quick)"));
+    QObject::connect(
+        run_simulation_quick_action_,
+        &QAction::triggered,
+        this,
+        &cz::main_window::run_simulation_quick
+    );
 }
 
 void cz::main_window::open_ruleset()
@@ -255,9 +273,20 @@ void cz::main_window::view_edit_current_rules()
 
 void cz::main_window::run_simulation()
 {
+    start_simulation(simulation_run_mode::animated);
+}
+
+void cz::main_window::run_simulation_quick()
+{
+    start_simulation(simulation_run_mode::quick);
+}
+
+void cz::main_window::start_simulation(simulation_run_mode mode)
+{
     try {
         if (simulation_running_) {
             simulation_running_ = false;
+            run_mode_ = simulation_run_mode::none;
             update_run_action_text();
             stop_simulation_thread(false);
             return;
@@ -275,9 +304,15 @@ void cz::main_window::run_simulation()
 
         simulation_running_ = true;
         transition_in_flight_ = false;
+        run_mode_ = mode;
         update_run_action_text();
 
-        simulation_thread_->start_simulation(params_);
+        const auto presentation_mode =
+            mode == simulation_run_mode::quick
+            ? simulation_presentation_mode::quick
+            : simulation_presentation_mode::animated;
+
+        simulation_thread_->start_simulation(params_, presentation_mode);
     }
     catch (const std::exception& ex) {
         reset_simulation_session(false);
@@ -304,11 +339,27 @@ void cz::main_window::on_initial_frame_ready(const cyto_frame& frame)
     }
 }
 
+void cz::main_window::on_canonical_frame_ready(const cyto_frame& frame)
+{
+    if (!simulation_running_ ||
+        run_mode_ != simulation_run_mode::quick) {
+        return;
+    }
+
+    if (frame.empty()) {
+        canvas_->clear(Qt::black);
+    }
+    else {
+        canvas_->set(frame);
+    }
+}
+
 void cz::main_window::on_transition_ready(
     const cyto_frame& anim_start,
     const cyto_frame& anim_end)
 {
-    if (!simulation_running_) {
+    if (!simulation_running_ ||
+        run_mode_ != simulation_run_mode::animated) {
         return;
     }
 
@@ -324,7 +375,8 @@ void cz::main_window::on_transition_finished()
 
     transition_in_flight_ = false;
 
-    if (simulation_thread_ != nullptr) {
+    if (simulation_thread_ != nullptr &&
+        run_mode_ == simulation_run_mode::animated) {
         simulation_thread_->notify_transition_finished();
     }
 }
@@ -332,6 +384,8 @@ void cz::main_window::on_transition_finished()
 void cz::main_window::on_simulation_failed(const QString& message)
 {
     simulation_running_ = false;
+    transition_in_flight_ = false;
+    run_mode_ = simulation_run_mode::none;
     update_run_action_text();
 
     QMessageBox::critical(
@@ -344,6 +398,8 @@ void cz::main_window::on_simulation_failed(const QString& message)
 void cz::main_window::on_simulation_stopped()
 {
     simulation_running_ = false;
+    transition_in_flight_ = false;
+    run_mode_ = simulation_run_mode::none;
     update_run_action_text();
 }
 
@@ -415,11 +471,11 @@ void cz::main_window::stop_simulation_thread(bool wait_for_finish)
 void cz::main_window::reset_simulation_session(bool clear_canvas)
 {
     simulation_running_ = false;
+    transition_in_flight_ = false;
+    run_mode_ = simulation_run_mode::none;
     update_run_action_text();
 
     stop_simulation_thread(true);
-
-    transition_in_flight_ = false;
 
     if (clear_canvas && canvas_ != nullptr) {
         canvas_->clear(Qt::black);
@@ -428,11 +484,27 @@ void cz::main_window::reset_simulation_session(bool clear_canvas)
 
 void cz::main_window::update_run_action_text()
 {
-    if (run_simulation_action_ == nullptr) {
-        return;
+    if (run_simulation_action_ != nullptr) {
+        if (simulation_running_ &&
+            run_mode_ == simulation_run_mode::animated) {
+            run_simulation_action_->setText(tr("S&top Simulation"));
+        }
+        else {
+            run_simulation_action_->setText(tr("&Run Simulation"));
+        }
     }
 
-    run_simulation_action_->setText(
-        simulation_running_ ? tr("S&top") : tr("&Run Simulation")
-    );
+    if (run_simulation_quick_action_ != nullptr) {
+        if (simulation_running_ &&
+            run_mode_ == simulation_run_mode::quick) {
+            run_simulation_quick_action_->setText(
+                tr("Stop Simulation (&Quick)")
+            );
+        }
+        else {
+            run_simulation_quick_action_->setText(
+                tr("Run Simulation (&Quick)")
+            );
+        }
+    }
 }

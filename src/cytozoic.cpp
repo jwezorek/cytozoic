@@ -25,6 +25,9 @@ namespace
     constexpr auto k_max_iterations = 20;
     constexpr double k_deleted_weight_threshold = 0.5;
 
+    //constexpr auto k_lloyd_min_delta = 0.01;
+    //constexpr auto k_max_iterations = 2;
+
     struct cell
     {
         cz::cell_id id;
@@ -962,7 +965,8 @@ cz::cyto_state_transition cz::generate_transition(
 
     return { from, to };
 }
-cz::state_table_result cz::apply_state_tables(
+
+cz::state_table_result cz::apply_state_tables_animated(
         cz::cell_id_source& id_source,
         const cz::cyto_state& current_state,
         const cz::state_table& cell_tbl,
@@ -1025,6 +1029,45 @@ cz::state_table_result cz::apply_state_tables(
         cz::to_cyto_frame(trans.from, palette, from_scales),
         cz::to_cyto_frame(trans.to, palette, to_scales)
     };
+}
+
+cz::cyto_state cz::apply_state_tables_quick(
+        cz::cell_id_source& id_source,
+        const cz::cyto_state& current_state,
+        const cz::state_table& cell_tbl,
+        const cz::neighborhood_indexer& cell_indexer,
+        const cz::state_table_row& vert_tbl,
+        const cz::neighborhood_indexer& vert_indexer) {
+
+    const auto snapshot = build_topology_snapshot(current_state);
+
+    auto [next_state, delete_set] = apply_cell_table(
+        snapshot.graph,
+        cell_tbl,
+        cell_indexer
+    );
+
+    const auto add_list = apply_vertex_table(
+        id_source,
+        snapshot.graph,
+        snapshot.vertex_neighborhoods,
+        vert_tbl,
+        vert_indexer,
+        cell_tbl.size()
+    );
+
+    for (auto id : delete_set) {
+        id_source.release(id);
+    }
+
+    for (const auto& new_cell : add_list) {
+        auto canonical_cell = new_cell;
+        canonical_cell.phase = cz::life_stage::normal;
+        next_state.push_back(canonical_cell);
+    }
+
+    relax_cyto_state(next_state, {});
+    return next_state;
 }
 
 cz::cyto_params::cyto_params() :

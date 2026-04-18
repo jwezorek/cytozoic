@@ -102,7 +102,7 @@ namespace cz {
         cyto_frame anim_end;
     };
 
-    state_table_result apply_state_tables(
+    state_table_result apply_state_tables_animated(
         cell_id_source& id_source,
         const cyto_state& state,
         const state_table& cell_tbl,
@@ -110,6 +110,15 @@ namespace cz {
         const state_table_row& vert_tbl,
         const neighborhood_indexer& vert_indexer,
         const color_table& palette
+    );
+
+    cyto_state apply_state_tables_quick(
+        cell_id_source& id_source,
+        const cyto_state& state,
+        const state_table& cell_tbl,
+        const neighborhood_indexer& cell_indexer,
+        const state_table_row& vert_tbl,
+        const neighborhood_indexer& vert_indexer
     );
 
     struct cyto_params {

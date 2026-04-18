@@ -6,8 +6,8 @@
 #include <stdexcept>
 #include <utility>
 
-namespace
-{
+namespace {
+
     void validate_loaded_params(const cz::cyto_params& params)
     {
         if (params.num_states <= 0) {
@@ -60,6 +60,7 @@ namespace
             );
         }
     }
+
 } // namespace
 
 cz::simulation_thread::simulation_thread(QObject* parent)
@@ -74,11 +75,14 @@ cz::simulation_thread::~simulation_thread()
     wait();
 }
 
-void cz::simulation_thread::start_simulation(const cyto_params& params)
+void cz::simulation_thread::start_simulation(
+    const cyto_params& params,
+    simulation_presentation_mode mode)
 {
     {
         QMutexLocker locker(&mutex_);
         params_ = params;
+        mode_ = mode;
         stop_requested_ = false;
         transition_finished_ = false;
         pending_reclaim_ids_.clear();
@@ -107,10 +111,12 @@ void cz::simulation_thread::notify_transition_finished()
 void cz::simulation_thread::run()
 {
     cyto_params params;
+    simulation_presentation_mode mode;
 
     {
         QMutexLocker locker(&mutex_);
         params = params_;
+        mode = mode_;
         stop_requested_ = false;
         transition_finished_ = false;
         pending_reclaim_ids_.clear();
@@ -138,45 +144,67 @@ void cz::simulation_thread::run()
         }
 
         while (!is_stop_requested()) {
-            auto result = cz::apply_state_tables(
-                id_source_,
-                current_state_,
-                params.cell_state_table,
-                params.cell_indexer,
-                params.vertex_table,
-                params.vertex_indexer,
-                params.palette
-            );
+            if (mode == simulation_presentation_mode::animated) {
+                auto result = cz::apply_state_tables_animated(
+                    id_source_,
+                    current_state_,
+                    params.cell_state_table,
+                    params.cell_indexer,
+                    params.vertex_table,
+                    params.vertex_indexer,
+                    params.palette
+                );
 
-            if (is_stop_requested()) {
-                break;
+                if (is_stop_requested()) {
+                    break;
+                }
+
+                {
+                    QMutexLocker locker(&mutex_);
+                    pending_reclaim_ids_ = cz::deleted_cell_ids(result.anim_end);
+                    transition_finished_ = false;
+                }
+
+                emit transition_ready(
+                    std::move(result.anim_start),
+                    std::move(result.anim_end)
+                );
+
+                if (!wait_for_transition_finished()) {
+                    break;
+                }
+
+                release_pending_ids();
+                current_state_ = std::move(result.next_state);
             }
+            else {
+                current_state_ = cz::apply_state_tables_quick(
+                    id_source_,
+                    current_state_,
+                    params.cell_state_table,
+                    params.cell_indexer,
+                    params.vertex_table,
+                    params.vertex_indexer
+                );
 
-            {
-                QMutexLocker locker(&mutex_);
-                pending_reclaim_ids_ = cz::deleted_cell_ids(result.anim_end);
-                transition_finished_ = false;
+                if (is_stop_requested()) {
+                    break;
+                }
+
+                emit canonical_frame_ready(
+                    cz::to_cyto_frame(current_state_, params.palette, {})
+                );
             }
-
-            emit transition_ready(
-                std::move(result.anim_start),
-                std::move(result.anim_end)
-            );
-
-            if (!wait_for_transition_finished()) {
-                break;
-            }
-
-            release_pending_ids();
-            current_state_ = std::move(result.next_state);
 
             if (current_state_.empty()) {
                 break;
             }
         }
-    } catch (const std::exception& ex) {
+    }
+    catch (const std::exception& ex) {
         emit simulation_failed(QString::fromUtf8(ex.what()));
-    } catch (...) {
+    }
+    catch (...) {
         emit simulation_failed(QStringLiteral("Unknown simulation error."));
     }
 
