@@ -159,6 +159,20 @@ void cz::cytozoic_widget::set_show_cell_nuceli(bool show) {
     update();
 }
 
+void cz::cytozoic_widget::cancel_transition()
+{
+    if (!animation_timer_.isActive()) {
+        return;
+    }
+
+    animation_timer_.stop();
+    anim_start_.clear();
+    anim_end_.clear();
+    reclaimable_ids_.clear();
+
+    emit transition_finished();
+}
+
 std::vector<cz::cell_id> cz::cytozoic_widget::take_reclaimable_ids()
 {
     auto result = reclaimable_ids_;

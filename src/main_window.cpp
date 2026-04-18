@@ -1,20 +1,20 @@
 #include "main_window.hpp"
+
 #include "rules_dialog.hpp"
-#include "cytozoic.hpp"
 #include "serialize.hpp"
+#include "simulation.hpp"
+
+#include <QAction>
+#include <QFileDialog>
+#include <QMenu>
+#include <QMenuBar>
+#include <QMessageBox>
+
 #include <stdexcept>
 #include <utility>
-#include <vector>
-#include <ranges>
-
-namespace r = std::ranges;
-namespace rv = std::ranges::views;
 
 namespace
 {
-    constexpr double k_lloyd_min_delta = 0.001;
-    constexpr int k_max_iterations = 20;
-
     void validate_loaded_params(const cz::cyto_params& params)
     {
         if (params.num_states <= 0) {
@@ -29,14 +29,17 @@ namespace
             throw std::runtime_error("missing vertex_indexer.");
         }
 
-        if (params.cell_state_table.size() != static_cast<std::size_t>(params.num_states)) {
+        if (params.cell_state_table.size() !=
+            static_cast<std::size_t>(params.num_states)) {
             throw std::runtime_error(
                 "cell_state_table row count must equal num_states."
             );
         }
 
         const std::size_t expected_cell_columns =
-            params.cell_indexer->num_columns(static_cast<std::size_t>(params.num_states));
+            params.cell_indexer->num_columns(
+                static_cast<std::size_t>(params.num_states)
+            );
 
         for (const auto& row : params.cell_state_table) {
             if (row.size() != expected_cell_columns) {
@@ -47,7 +50,9 @@ namespace
         }
 
         const std::size_t expected_vertex_columns =
-            params.vertex_indexer->num_columns(static_cast<std::size_t>(params.num_states));
+            params.vertex_indexer->num_columns(
+                static_cast<std::size_t>(params.num_states)
+            );
 
         if (params.vertex_table.size() != expected_vertex_columns) {
             throw std::runtime_error(
@@ -55,18 +60,19 @@ namespace
             );
         }
 
-        if (params.palette.size() < static_cast<std::size_t>(params.num_states)) {
+        if (params.palette.size() <
+            static_cast<std::size_t>(params.num_states)) {
             throw std::runtime_error(
                 "palette must contain at least num_states colors."
             );
         }
     }
-
 } // namespace
 
-cz::main_window::main_window(QWidget* parent)
-    : QMainWindow(parent)
-{
+cz::main_window::main_window(QWidget* parent) : 
+        QMainWindow(parent),
+        simulation_thread_(new cz::simulation_thread(this)) {
+
     setCentralWidget(canvas_ = new cytozoic_widget(this));
     create_menus();
     setWindowTitle(tr("cytozoic"));
@@ -78,16 +84,53 @@ cz::main_window::main_window(QWidget* parent)
         this,
         &cz::main_window::on_transition_finished
     );
+
+    connect(
+        simulation_thread_,
+        &cz::simulation_thread::initial_frame_ready,
+        this,
+        &cz::main_window::on_initial_frame_ready,
+        Qt::QueuedConnection
+    );
+
+    connect(
+        simulation_thread_,
+        &cz::simulation_thread::transition_ready,
+        this,
+        &cz::main_window::on_transition_ready,
+        Qt::QueuedConnection
+    );
+
+    connect(
+        simulation_thread_,
+        &cz::simulation_thread::simulation_failed,
+        this,
+        &cz::main_window::on_simulation_failed,
+        Qt::QueuedConnection
+    );
+
+    connect(
+        simulation_thread_,
+        &cz::simulation_thread::simulation_stopped,
+        this,
+        &cz::main_window::on_simulation_stopped,
+        Qt::QueuedConnection
+    );
 }
 
-cz::main_window::~main_window() = default;
+cz::main_window::~main_window()
+{
+    stop_simulation_thread(true);
+}
 
-void cz::main_window::set_params(const cyto_params& params) {
+void cz::main_window::set_params(const cyto_params& params)
+{
     params_ = params;
     reset_simulation_session();
 }
 
-cz::cyto_params cz::main_window::get_params() const {
+cz::cyto_params cz::main_window::get_params() const
+{
     return params_;
 }
 
@@ -186,7 +229,8 @@ void cz::main_window::save_ruleset_as()
     const QString file_path = QFileDialog::getSaveFileName(
         this,
         tr("Save Ruleset As"),
-        current_ruleset_path_.isEmpty() ? QStringLiteral("ruleset.json")
+        current_ruleset_path_.isEmpty()
+        ? QStringLiteral("ruleset.json")
         : current_ruleset_path_,
         tr("JSON Files (*.json);;All Files (*.*)")
     );
@@ -198,17 +242,15 @@ void cz::main_window::save_ruleset_as()
     save_ruleset_to_file(file_path);
 }
 
-void cz::main_window::view_edit_current_rules() {
-
+void cz::main_window::view_edit_current_rules()
+{
     rules_dialog dialog(this, get_params());
 
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
 
-    auto edited = dialog.get();
-    set_params(edited);
-
+    set_params(dialog.get());
 }
 
 void cz::main_window::run_simulation()
@@ -217,6 +259,7 @@ void cz::main_window::run_simulation()
         if (simulation_running_) {
             simulation_running_ = false;
             update_run_action_text();
+            stop_simulation_thread(false);
             return;
         }
 
@@ -224,25 +267,17 @@ void cz::main_window::run_simulation()
             return;
         }
 
-        id_source_.reset();
-        pending_next_state_.clear();
-        current_state_ = cz::initial_cyto_state(params_, id_source_);
-        simulation_initialized_ = true;
-
-        if (current_state_.empty()) {
-            canvas_->clear(Qt::black);
-            simulation_running_ = false;
-            update_run_action_text();
+        if (simulation_thread_ == nullptr || simulation_thread_->isRunning()) {
             return;
         }
 
         canvas_->set_show_cell_nuceli(false);
-        canvas_->set(cz::to_cyto_frame(current_state_, params_.palette, {}));
 
         simulation_running_ = true;
+        transition_in_flight_ = false;
         update_run_action_text();
 
-        advance_simulation();
+        simulation_thread_->start_simulation(params_);
     }
     catch (const std::exception& ex) {
         reset_simulation_session(false);
@@ -255,92 +290,67 @@ void cz::main_window::run_simulation()
     }
 }
 
-void cz::main_window::advance_simulation()
+void cz::main_window::on_initial_frame_ready(const cyto_frame& frame)
 {
-    if (!simulation_running_ || transition_in_flight_) {
-        return;
-    }
-
-    if (!simulation_initialized_) {
-        return;
-    }
-
-    if (!params_.cell_indexer) {
-        throw std::runtime_error("advance_simulation: missing cell indexer.");
-    }
-
-    if (!params_.vertex_indexer) {
-        throw std::runtime_error("advance_simulation: missing vertex indexer.");
-    }
-
-    if (params_.num_states <= 0) {
-        throw std::runtime_error("advance_simulation: num_states must be positive.");
-    }
-
-    if (params_.cell_state_table.size() != static_cast<std::size_t>(params_.num_states)) {
-        throw std::runtime_error(
-            "advance_simulation: cell_state_table row count must equal num_states."
-        );
-    }
-
-    if (params_.vertex_table.size() !=
-        params_.vertex_indexer->num_columns(static_cast<std::size_t>(params_.num_states))) {
-        throw std::runtime_error(
-            "advance_simulation: vertex_table width does not match vertex indexer."
-        );
-    }
-
-    if (params_.palette.size() < static_cast<std::size_t>(params_.num_states)) {
-        throw std::runtime_error("advance_simulation: palette is too small.");
-    }
-
-    const auto result = cz::apply_state_tables(
-        id_source_,
-        current_state_,
-        params_.cell_state_table,
-        params_.cell_indexer,
-        params_.vertex_table,
-        params_.vertex_indexer,
-        params_.palette
-    );
-
     if (!simulation_running_) {
         return;
     }
 
-    pending_next_state_ = result.next_state;
-    transition_in_flight_ = true;
+    if (frame.empty()) {
+        canvas_->clear(Qt::black);
+    }
+    else {
+        canvas_->set(frame);
+    }
+}
 
-    canvas_->start_transition(result.anim_start, result.anim_end);
+void cz::main_window::on_transition_ready(
+    const cyto_frame& anim_start,
+    const cyto_frame& anim_end)
+{
+    if (!simulation_running_) {
+        return;
+    }
+
+    transition_in_flight_ = true;
+    canvas_->start_transition(anim_start, anim_end);
 }
 
 void cz::main_window::on_transition_finished()
 {
-    for (const cz::cell_id id : canvas_->take_reclaimable_ids()) {
-        id_source_.release(id);
-    }
-
-    current_state_ = std::move(pending_next_state_);
-    pending_next_state_.clear();
-    transition_in_flight_ = false;
-
-    if (!simulation_running_) {
-        update_run_action_text();
+    if (!transition_in_flight_) {
         return;
     }
 
-    QTimer::singleShot(
-        0,
+    transition_in_flight_ = false;
+
+    if (simulation_thread_ != nullptr) {
+        simulation_thread_->notify_transition_finished();
+    }
+}
+
+void cz::main_window::on_simulation_failed(const QString& message)
+{
+    simulation_running_ = false;
+    update_run_action_text();
+
+    QMessageBox::critical(
         this,
-        [this]() {
-            advance_simulation();
-        }
+        tr("Run Simulation"),
+        tr("Simulation failed:\n%1").arg(message)
     );
 }
 
-bool cz::main_window::load_ruleset_from_file(const QString& file_path) {
+void cz::main_window::on_simulation_stopped()
+{
+    simulation_running_ = false;
+    update_run_action_text();
+}
 
-    auto loaded = cz::load_ruleset_from_file( file_path.toStdString() );
+bool cz::main_window::load_ruleset_from_file(const QString& file_path)
+{
+    auto loaded = cz::load_ruleset_from_file(file_path.toStdString());
+
     if (!loaded) {
         QMessageBox::critical(
             this,
@@ -349,14 +359,29 @@ bool cz::main_window::load_ruleset_from_file(const QString& file_path) {
         );
         return false;
     }
-    set_params( *loaded );
-    return true;
 
+    try {
+        validate_loaded_params(*loaded);
+    }
+    catch (const std::exception& ex) {
+        QMessageBox::critical(
+            this,
+            tr("Open Ruleset"),
+            tr("Invalid ruleset:\n%1").arg(QString::fromUtf8(ex.what()))
+        );
+        return false;
+    }
+
+    set_params(*loaded);
+    current_ruleset_path_ = file_path;
+    return true;
 }
 
-bool cz::main_window::save_ruleset_to_file(const QString& file_path) {
+bool cz::main_window::save_ruleset_to_file(const QString& file_path)
+{
+    const bool result =
+        cz::save_ruleset_to_file(file_path.toStdString(), get_params());
 
-    auto result = cz::save_ruleset_to_file(file_path.toStdString(), get_params());
     if (!result) {
         QMessageBox::critical(
             this,
@@ -365,24 +390,40 @@ bool cz::main_window::save_ruleset_to_file(const QString& file_path) {
         );
         return false;
     }
+
+    current_ruleset_path_ = file_path;
     return true;
+}
+
+void cz::main_window::stop_simulation_thread(bool wait_for_finish)
+{
+    if (simulation_thread_ == nullptr) {
+        return;
+    }
+
+    simulation_thread_->request_stop();
+
+    if (transition_in_flight_ && canvas_ != nullptr) {
+        canvas_->cancel_transition();
+    }
+
+    if (wait_for_finish && simulation_thread_->isRunning()) {
+        simulation_thread_->wait();
+    }
 }
 
 void cz::main_window::reset_simulation_session(bool clear_canvas)
 {
-    simulation_initialized_ = false;
     simulation_running_ = false;
-    transition_in_flight_ = false;
+    update_run_action_text();
 
-    current_state_.clear();
-    pending_next_state_.clear();
-    id_source_.reset();
+    stop_simulation_thread(true);
+
+    transition_in_flight_ = false;
 
     if (clear_canvas && canvas_ != nullptr) {
         canvas_->clear(Qt::black);
     }
-
-    update_run_action_text();
 }
 
 void cz::main_window::update_run_action_text()

@@ -36,7 +36,7 @@ namespace cz {
             const cyto_frame& from,
             const cyto_frame& to
         );
-
+        void cancel_transition();
         std::vector<cell_id> take_reclaimable_ids();
 
     signals:

@@ -32,6 +32,7 @@ add_executable(cytozoic
     src/neighborhood_indexer.cpp
     src/rules_dialog.cpp
     src/serialize.cpp
+    src/simulation.cpp
 )
 
 target_link_libraries(
