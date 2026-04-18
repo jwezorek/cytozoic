@@ -8,6 +8,8 @@
 
 namespace {
 
+    constexpr int k_min_frame_spacing_ms = 16;
+
     void validate_loaded_params(const cz::cyto_params& params)
     {
         if (params.num_states <= 0) {
@@ -86,6 +88,8 @@ void cz::simulation_thread::start_simulation(
         stop_requested_ = false;
         transition_finished_ = false;
         pending_reclaim_ids_.clear();
+        frame_spacing_started_ = false;
+        frame_spacing_timer_.invalidate();
     }
 
     if (!isRunning()) {
@@ -120,6 +124,8 @@ void cz::simulation_thread::run()
         stop_requested_ = false;
         transition_finished_ = false;
         pending_reclaim_ids_.clear();
+        frame_spacing_started_ = false;
+        frame_spacing_timer_.invalidate();
     }
 
     try {
@@ -130,6 +136,11 @@ void cz::simulation_thread::run()
         current_state_ = cz::initial_cyto_state(params, id_source_);
 
         if (is_stop_requested()) {
+            emit simulation_stopped();
+            return;
+        }
+
+        if (!throttle_frame_rate(k_min_frame_spacing_ms)) {
             emit simulation_stopped();
             return;
         }
@@ -156,6 +167,10 @@ void cz::simulation_thread::run()
                 );
 
                 if (is_stop_requested()) {
+                    break;
+                }
+
+                if (!throttle_frame_rate(k_min_frame_spacing_ms)) {
                     break;
                 }
 
@@ -188,6 +203,10 @@ void cz::simulation_thread::run()
                 );
 
                 if (is_stop_requested()) {
+                    break;
+                }
+
+                if (!throttle_frame_rate(k_min_frame_spacing_ms)) {
                     break;
                 }
 
@@ -233,6 +252,40 @@ bool cz::simulation_thread::wait_for_transition_finished()
     const bool keep_running = !stop_requested_;
     transition_finished_ = false;
     return keep_running;
+}
+
+bool cz::simulation_thread::throttle_frame_rate(int min_frame_spacing_ms)
+{
+    if (min_frame_spacing_ms <= 0) {
+        QMutexLocker locker(&mutex_);
+        frame_spacing_timer_.restart();
+        frame_spacing_started_ = true;
+        return !stop_requested_;
+    }
+
+    QMutexLocker locker(&mutex_);
+
+    if (!frame_spacing_started_) {
+        frame_spacing_timer_.start();
+        frame_spacing_started_ = true;
+        return !stop_requested_;
+    }
+
+    const qint64 elapsed_ms = frame_spacing_timer_.elapsed();
+
+    if (elapsed_ms < min_frame_spacing_ms) {
+        const unsigned long remaining_ms =
+            static_cast<unsigned long>(min_frame_spacing_ms - elapsed_ms);
+
+        condition_.wait(&mutex_, remaining_ms);
+    }
+
+    if (stop_requested_) {
+        return false;
+    }
+
+    frame_spacing_timer_.restart();
+    return true;
 }
 
 void cz::simulation_thread::release_pending_ids()

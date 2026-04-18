@@ -26,8 +26,10 @@
 
 namespace {
 
-    class palette_editor : public QWidget
-    {
+    constexpr int k_min_cells = 20;
+    constexpr int k_max_cells = 10000;
+
+    class palette_editor : public QWidget {
     public:
         explicit palette_editor(QWidget* parent = nullptr)
             : QWidget(parent)
@@ -182,11 +184,11 @@ namespace {
     };
 
     int safe_cell_value(
-        const QTableWidget* table,
-        int row,
-        int col,
-        int fallback = -1)
-    {
+            const QTableWidget* table,
+            int row,
+            int col,
+            int fallback = -1) {
+
         if (auto* widget = qobject_cast<QSpinBox*>(table->cellWidget(row, col))) {
             return widget->value();
         }
@@ -195,12 +197,12 @@ namespace {
     }
 
     void rebuild_state_table(
-        QTableWidget* table,
-        int rows,
-        int columns,
-        int min_value,
-        int max_value)
-    {
+            QTableWidget* table,
+            int rows,
+            int columns,
+            int min_value,
+            int max_value) {
+
         std::vector<std::vector<int>> old_values(
             static_cast<std::size_t>(table->rowCount()),
             std::vector<int>(static_cast<std::size_t>(table->columnCount()), -1)
@@ -257,9 +259,9 @@ namespace {
     }
 
     void set_state_table_values(
-        QTableWidget* table,
-        const cz::state_table& values)
-    {
+            QTableWidget* table,
+            const cz::state_table& values) {
+
         const int row_count = std::min(
             table->rowCount(),
             static_cast<int>(values.size())
@@ -279,8 +281,8 @@ namespace {
         }
     }
 
-    cz::state_table read_state_table(const QTableWidget* table)
-    {
+    cz::state_table read_state_table(const QTableWidget* table) {
+
         cz::state_table result(
             static_cast<std::size_t>(table->rowCount()),
             cz::state_table_row(
@@ -301,9 +303,9 @@ namespace {
     }
 
     void set_state_table_row_values(
-        QTableWidget* table,
-        const cz::state_table_row& values)
-    {
+            QTableWidget* table,
+            const cz::state_table_row& values) {
+
         if (table->rowCount() < 1) {
             return;
         }
@@ -320,8 +322,7 @@ namespace {
         }
     }
 
-    cz::state_table_row read_state_table_row(const QTableWidget* table)
-    {
+    cz::state_table_row read_state_table_row(const QTableWidget* table) {
         cz::state_table_row result(
             static_cast<std::size_t>(table->columnCount()),
             -1
@@ -338,16 +339,16 @@ namespace {
         return result;
     }
 
-    cz::neighborhood_indexer make_indexer_from_dialog_name(const QString& name)
-    {
+    cz::neighborhood_indexer make_indexer_from_dialog_name(const QString& name) {
+
         const std::string value = name.toStdString();
         return cz::indexer_from_name(value);
     }
 
     QString indexer_name_or_default(
-        const cz::neighborhood_indexer& indexer,
-        const QString& fallback)
-    {
+            const cz::neighborhood_indexer& indexer,
+            const QString& fallback) {
+
         if (indexer) {
             return QString::fromStdString(indexer->name());
         }
@@ -356,10 +357,10 @@ namespace {
     }
 
     void randomize_cell_table(
-        QTableWidget* table,
-        int num_states,
-        int death_probability_percent)
-    {
+            QTableWidget* table,
+            int num_states,
+            int death_probability_percent) {
+
         if (table == nullptr) {
             return;
         }
@@ -395,8 +396,8 @@ namespace {
         }
     }
 
-    void refresh_vertex_birth_count_combo(QComboBox* combo, int column_count)
-    {
+    void refresh_vertex_birth_count_combo(QComboBox* combo, int column_count) {
+
         if (combo == nullptr) {
             return;
         }
@@ -418,10 +419,10 @@ namespace {
     }
 
     void randomize_vertex_table(
-        QTableWidget* table,
-        int num_states,
-        int num_live_entries)
-    {
+            QTableWidget* table,
+            int num_states,
+            int num_live_entries) {
+
         if (table == nullptr || table->rowCount() < 1) {
             return;
         }
@@ -447,12 +448,11 @@ namespace {
         std::ranges::shuffle(*reinterpret_cast<std::vector<int>*>(&columns), *QRandomGenerator::global());
     }
 
-    class state_density_editor : public QWidget
-    {
+    class state_density_editor : public QWidget {
     public:
         explicit state_density_editor(QWidget* parent = nullptr)
-            : QWidget(parent)
-        {
+                : QWidget(parent)  {
+
             auto* root = new QVBoxLayout(this);
             root->setContentsMargins(0, 0, 0, 0);
             layout_ = new QGridLayout();
@@ -460,8 +460,8 @@ namespace {
             root->addStretch();
         }
 
-        void set_num_states(int num_states)
-        {
+        void set_num_states(int num_states) {
+
             if (num_states < 1) {
                 num_states = 1;
             }
@@ -477,8 +477,8 @@ namespace {
             refresh_labels();
         }
 
-        void set_density(const std::vector<double>& density)
-        {
+        void set_density(const std::vector<double>& density) {
+
             if (sliders_.empty()) {
                 return;
             }
@@ -509,8 +509,8 @@ namespace {
             refresh_labels();
         }
 
-        std::vector<double> density() const
-        {
+        std::vector<double> density() const {
+
             std::vector<double> result;
             result.reserve(sliders_.size());
 
@@ -538,8 +538,8 @@ namespace {
         }
 
     private:
-        void add_row(int state_index)
-        {
+        void add_row(int state_index) {
+
             auto* state_label = new QLabel(
                 QStringLiteral("State %1").arg(state_index),
                 this
@@ -571,8 +571,8 @@ namespace {
             );
         }
 
-        void remove_last_row()
-        {
+        void remove_last_row() {
+
             if (sliders_.empty()) {
                 return;
             }
@@ -586,8 +586,8 @@ namespace {
             value_labels_.pop_back();
         }
 
-        void refresh_labels()
-        {
+        void refresh_labels() {
+
             int total = 0;
             for (const auto* slider : sliders_) {
                 total += slider->value();
@@ -618,10 +618,10 @@ namespace {
 
 
     void randomize_vertex_table_impl(
-        QTableWidget* table,
-        int num_states,
-        int num_live_entries)
-    {
+            QTableWidget* table,
+            int num_states,
+            int num_live_entries) {
+
         if (table == nullptr || table->rowCount() < 1) {
             return;
         }
@@ -662,8 +662,8 @@ namespace {
 
 } // namespace
 
-void cz::rules_dialog::rebuild_tables()
-{
+void cz::rules_dialog::rebuild_tables() {
+
     const int num_states = num_states_combo_->currentData().toInt();
     const int min_value = -1;
     const int max_value = num_states - 1;
@@ -744,7 +744,7 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params) :
 
     auto* num_initial_cells_label = new QLabel(tr("Initial cell count"), initial_tab);
     num_initial_cells_spin_ = new QSpinBox(initial_tab);
-    num_initial_cells_spin_->setRange(10, 5000);
+    num_initial_cells_spin_->setRange(k_min_cells, k_max_cells);
 
     auto* state_density_label = new QLabel(tr("State density"), initial_tab);
     density_editor_ = new state_density_editor(initial_tab);

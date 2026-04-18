@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QMutex>
 #include <QThread>
 #include <QWaitCondition>
@@ -42,6 +43,7 @@ namespace cz {
         void validate_params(const cyto_params& params) const;
         bool is_stop_requested() const;
         bool wait_for_transition_finished();
+        bool throttle_frame_rate(int min_frame_spacing_ms);
         void release_pending_ids();
 
         mutable QMutex mutex_;
@@ -57,6 +59,9 @@ namespace cz {
 
         bool stop_requested_ = false;
         bool transition_finished_ = false;
+
+        QElapsedTimer frame_spacing_timer_;
+        bool frame_spacing_started_ = false;
     };
 
 } // namespace cz
