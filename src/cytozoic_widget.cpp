@@ -22,12 +22,13 @@ namespace {
 } // namespace
 
 cz::cytozoic_widget::cytozoic_widget(QWidget* parent, int duration_ms, int interval_ms) :
-    QWidget(parent),
-    animation_duration_ms_(duration_ms),
-    animation_frame_interval_ms_(interval_ms),
-    animation_elapsed_ms_(0),
-    show_cell_nuclei_(false)
-{
+        QWidget(parent),
+        animation_duration_ms_(duration_ms),
+        animation_frame_interval_ms_(interval_ms),
+        animation_elapsed_ms_(0),
+        show_cell_nuclei_(false),
+        show_cell_border_(true) {
+
     setAttribute(Qt::WA_OpaquePaintEvent);
     setAttribute(Qt::WA_NoSystemBackground);
     setAutoFillBackground(false);
@@ -98,7 +99,12 @@ void cz::cytozoic_widget::set(const cyto_frame& v) {
 
     QPainter painter(&framebuffer_);
     painter.setRenderHint(QPainter::Antialiasing, false);
-    painter.setPen(QPen(Qt::black, 1.0));
+
+    if (show_cell_border_) {
+        painter.setPen(QPen(Qt::black, 1.0));
+    } else {
+        painter.setPen(Qt::NoPen);
+    }
 
     for (const auto& c : v) {
         if (c.shape.empty()) {

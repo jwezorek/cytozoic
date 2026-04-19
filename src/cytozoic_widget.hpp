@@ -58,6 +58,7 @@ namespace cz {
         cyto_frame anim_start_;
         cyto_frame anim_end_;
         bool show_cell_nuclei_;
+        bool show_cell_border_;
         QTimer animation_timer_;
         std::vector<cell_id> reclaimable_ids_;
     };
