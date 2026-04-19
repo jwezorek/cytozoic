@@ -28,6 +28,7 @@ namespace {
 
     constexpr int k_min_cells = 20;
     constexpr int k_max_cells = 10000;
+    int g_cell_death_probability_percent = 25;
 
     class palette_editor : public QWidget {
     public:
@@ -184,11 +185,11 @@ namespace {
     };
 
     int safe_cell_value(
-            const QTableWidget* table,
-            int row,
-            int col,
-            int fallback = -1) {
-
+        const QTableWidget* table,
+        int row,
+        int col,
+        int fallback = -1)
+    {
         if (auto* widget = qobject_cast<QSpinBox*>(table->cellWidget(row, col))) {
             return widget->value();
         }
@@ -197,12 +198,12 @@ namespace {
     }
 
     void rebuild_state_table(
-            QTableWidget* table,
-            int rows,
-            int columns,
-            int min_value,
-            int max_value) {
-
+        QTableWidget* table,
+        int rows,
+        int columns,
+        int min_value,
+        int max_value)
+    {
         std::vector<std::vector<int>> old_values(
             static_cast<std::size_t>(table->rowCount()),
             std::vector<int>(static_cast<std::size_t>(table->columnCount()), -1)
@@ -259,9 +260,9 @@ namespace {
     }
 
     void set_state_table_values(
-            QTableWidget* table,
-            const cz::state_table& values) {
-
+        QTableWidget* table,
+        const cz::state_table& values)
+    {
         const int row_count = std::min(
             table->rowCount(),
             static_cast<int>(values.size())
@@ -281,8 +282,8 @@ namespace {
         }
     }
 
-    cz::state_table read_state_table(const QTableWidget* table) {
-
+    cz::state_table read_state_table(const QTableWidget* table)
+    {
         cz::state_table result(
             static_cast<std::size_t>(table->rowCount()),
             cz::state_table_row(
@@ -303,9 +304,9 @@ namespace {
     }
 
     void set_state_table_row_values(
-            QTableWidget* table,
-            const cz::state_table_row& values) {
-
+        QTableWidget* table,
+        const cz::state_table_row& values)
+    {
         if (table->rowCount() < 1) {
             return;
         }
@@ -322,7 +323,8 @@ namespace {
         }
     }
 
-    cz::state_table_row read_state_table_row(const QTableWidget* table) {
+    cz::state_table_row read_state_table_row(const QTableWidget* table)
+    {
         cz::state_table_row result(
             static_cast<std::size_t>(table->columnCount()),
             -1
@@ -339,16 +341,16 @@ namespace {
         return result;
     }
 
-    cz::neighborhood_indexer make_indexer_from_dialog_name(const QString& name) {
-
+    cz::neighborhood_indexer make_indexer_from_dialog_name(const QString& name)
+    {
         const std::string value = name.toStdString();
         return cz::indexer_from_name(value);
     }
 
     QString indexer_name_or_default(
-            const cz::neighborhood_indexer& indexer,
-            const QString& fallback) {
-
+        const cz::neighborhood_indexer& indexer,
+        const QString& fallback)
+    {
         if (indexer) {
             return QString::fromStdString(indexer->name());
         }
@@ -357,10 +359,10 @@ namespace {
     }
 
     void randomize_cell_table(
-            QTableWidget* table,
-            int num_states,
-            int death_probability_percent) {
-
+        QTableWidget* table,
+        int num_states,
+        int death_probability_percent)
+    {
         if (table == nullptr) {
             return;
         }
@@ -396,8 +398,8 @@ namespace {
         }
     }
 
-    void refresh_vertex_birth_count_combo(QComboBox* combo, int column_count) {
-
+    void refresh_vertex_birth_count_combo(QComboBox* combo, int column_count)
+    {
         if (combo == nullptr) {
             return;
         }
@@ -418,41 +420,11 @@ namespace {
         combo->setCurrentIndex(combo->findData(clamped_old_value));
     }
 
-    void randomize_vertex_table(
-            QTableWidget* table,
-            int num_states,
-            int num_live_entries) {
-
-        if (table == nullptr || table->rowCount() < 1) {
-            return;
-        }
-
-        const int column_count = table->columnCount();
-        num_live_entries = std::clamp(num_live_entries, 0, column_count);
-
-        for (int c = 0; c < column_count; ++c) {
-            if (auto* spin = qobject_cast<QSpinBox*>(table->cellWidget(0, c))) {
-                spin->setValue(-1);
-            }
-        }
-
-        if (num_states <= 1 || num_live_entries <= 0) {
-            return;
-        }
-
-        std::vector<int> columns(static_cast<std::size_t>(column_count));
-        for (int i = 0; i < column_count; ++i) {
-            columns[static_cast<std::size_t>(i)] = i;
-        }
-
-        std::ranges::shuffle(*reinterpret_cast<std::vector<int>*>(&columns), *QRandomGenerator::global());
-    }
-
     class state_density_editor : public QWidget {
     public:
         explicit state_density_editor(QWidget* parent = nullptr)
-                : QWidget(parent)  {
-
+            : QWidget(parent)
+        {
             auto* root = new QVBoxLayout(this);
             root->setContentsMargins(0, 0, 0, 0);
             layout_ = new QGridLayout();
@@ -460,8 +432,8 @@ namespace {
             root->addStretch();
         }
 
-        void set_num_states(int num_states) {
-
+        void set_num_states(int num_states)
+        {
             if (num_states < 1) {
                 num_states = 1;
             }
@@ -477,8 +449,8 @@ namespace {
             refresh_labels();
         }
 
-        void set_density(const std::vector<double>& density) {
-
+        void set_density(const std::vector<double>& density)
+        {
             if (sliders_.empty()) {
                 return;
             }
@@ -509,8 +481,8 @@ namespace {
             refresh_labels();
         }
 
-        std::vector<double> density() const {
-
+        std::vector<double> density() const
+        {
             std::vector<double> result;
             result.reserve(sliders_.size());
 
@@ -538,8 +510,8 @@ namespace {
         }
 
     private:
-        void add_row(int state_index) {
-
+        void add_row(int state_index)
+        {
             auto* state_label = new QLabel(
                 QStringLiteral("State %1").arg(state_index),
                 this
@@ -571,8 +543,8 @@ namespace {
             );
         }
 
-        void remove_last_row() {
-
+        void remove_last_row()
+        {
             if (sliders_.empty()) {
                 return;
             }
@@ -586,8 +558,8 @@ namespace {
             value_labels_.pop_back();
         }
 
-        void refresh_labels() {
-
+        void refresh_labels()
+        {
             int total = 0;
             for (const auto* slider : sliders_) {
                 total += slider->value();
@@ -615,13 +587,11 @@ namespace {
         std::vector<QLabel*> value_labels_;
     };
 
-
-
     void randomize_vertex_table_impl(
-            QTableWidget* table,
-            int num_states,
-            int num_live_entries) {
-
+        QTableWidget* table,
+        int num_states,
+        int num_live_entries)
+    {
         if (table == nullptr || table->rowCount() < 1) {
             return;
         }
@@ -662,8 +632,8 @@ namespace {
 
 } // namespace
 
-void cz::rules_dialog::rebuild_tables() {
-
+void cz::rules_dialog::rebuild_tables()
+{
     const int num_states = num_states_combo_->currentData().toInt();
     const int min_value = -1;
     const int max_value = num_states - 1;
@@ -707,8 +677,8 @@ void cz::rules_dialog::rebuild_tables() {
     }
 }
 
-cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params) :
-    QDialog(parent)
+cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
+    : QDialog(parent)
 {
     setWindowTitle(tr("Current Rules"));
     setModal(true);
@@ -726,10 +696,6 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params) :
 
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-
-    //--------------------------------------------------------------------------
-    // Initial configuration tab
-    //--------------------------------------------------------------------------
 
     auto* initial_tab = new QWidget(tabs);
     auto* initial_layout = new QVBoxLayout(initial_tab);
@@ -767,10 +733,6 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params) :
     initial_layout->addStretch();
     tabs->addTab(initial_tab, tr("Initial Configuration"));
 
-    //--------------------------------------------------------------------------
-    // Cell table tab
-    //--------------------------------------------------------------------------
-
     auto* cell_tab = new QWidget(tabs);
     auto* cell_layout = new QVBoxLayout(cell_tab);
     auto* cell_top_row = new QHBoxLayout();
@@ -796,7 +758,7 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params) :
     auto* cell_death_probability_spin = new QSpinBox(cell_random_group);
     cell_death_probability_spin->setRange(0, 100);
     cell_death_probability_spin->setSuffix(tr("%"));
-    cell_death_probability_spin->setValue(25);
+    cell_death_probability_spin->setValue(g_cell_death_probability_percent);
 
     auto* cell_randomize_button =
         new QPushButton(tr("Generate Random States"), cell_random_group);
@@ -811,10 +773,6 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params) :
     cell_layout->addWidget(cell_table_);
     cell_layout->addWidget(cell_random_group);
     tabs->addTab(cell_tab, tr("Cell Table"));
-
-    //--------------------------------------------------------------------------
-    // Vertex table tab
-    //--------------------------------------------------------------------------
 
     auto* vertex_tab = new QWidget(tabs);
     auto* vertex_layout = new QVBoxLayout(vertex_tab);
@@ -857,10 +815,6 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params) :
     vertex_layout->addWidget(vertex_table_);
     vertex_layout->addWidget(vertex_random_group);
     tabs->addTab(vertex_tab, tr("Vertex Table"));
-
-    //--------------------------------------------------------------------------
-    // Initialization from current params
-    //--------------------------------------------------------------------------
 
     num_states_combo_->setCurrentIndex(
         std::max(0, num_states_combo_->findData(params.num_states))
@@ -919,14 +873,26 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params) :
     );
 
     connect(
+        cell_death_probability_spin,
+        qOverload<int>(&QSpinBox::valueChanged),
+        this,
+        [](int value) {
+            g_cell_death_probability_percent = value;
+        }
+    );
+
+    connect(
         cell_randomize_button,
         &QPushButton::clicked,
         this,
         [this, cell_death_probability_spin]() {
+            g_cell_death_probability_percent =
+                cell_death_probability_spin->value();
+
             randomize_cell_table(
                 cell_table_,
                 num_states_combo_->currentData().toInt(),
-                cell_death_probability_spin->value()
+                g_cell_death_probability_percent
             );
         }
     );
