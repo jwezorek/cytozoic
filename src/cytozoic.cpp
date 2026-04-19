@@ -20,6 +20,14 @@ namespace rv = std::ranges::views;
 
 namespace
 {
+    template<class... Fs>
+    struct overload : Fs... {
+        using Fs::operator()...;
+    };
+
+    template<class... Fs>
+    overload(Fs...) -> overload<Fs...>;
+
     constexpr auto k_small_weight = 0.01;
     constexpr auto k_lloyd_min_delta = 0.001;
     constexpr auto k_max_iterations = 20;
@@ -481,8 +489,7 @@ namespace
                 k_lloyd_min_delta,
                 k_max_iterations
             );
-        }
-        else {
+        } else {
             std::vector<cz::weighted_point> weighted_sites;
             weighted_sites.reserve(state.size());
 
@@ -574,13 +581,13 @@ namespace
     }
 
     std::vector<cz::cell_state> apply_vertex_table(
-        cz::cell_id_source& id_source,
-        const cell_graph& graph,
-        const std::vector<vertex_neighborhood>& neighborhoods,
-        const cz::state_table_row& vert_tbl,
-        const cz::neighborhood_indexer& vert_indexer,
-        std::size_t num_states)
-    {
+            cz::cell_id_source& id_source,
+            const cell_graph& graph,
+            const std::vector<vertex_neighborhood>& neighborhoods,
+            const cz::state_table_row& vert_tbl,
+            const cz::neighborhood_indexer& vert_indexer,
+            std::size_t num_states) {
+
         std::vector<cz::cell_state> add_list;
 
         for (const auto& neighborhood : neighborhoods) {
@@ -614,6 +621,34 @@ namespace
         }
 
         return add_list;
+    }
+
+    std::vector<cz::cell_state> do_cell_birth(
+            const cz::birth_parameters& params,
+            cz::cell_id_source& id_source,
+            const topology_snapshot& snapshot,
+            size_t num_states ) {
+
+        return std::visit(
+            overload{
+                [&](const cz::vertex_based_birth& vb)->std::vector<cz::cell_state> {
+                    return apply_vertex_table(
+                        id_source,
+                        snapshot.graph,
+                        snapshot.vertex_neighborhoods,
+                        vb.vertex_table,
+                        vb.vertex_indexer,
+                        num_states
+                    );
+                },
+                [&](const cz::cell_based_birth& cb)->std::vector<cz::cell_state> {
+                    // TODO
+                    return {};
+                }
+            },
+            params
+        );
+        
     }
 
 } // namespace
@@ -981,8 +1016,7 @@ cz::state_table_result cz::apply_state_tables_animated(
         const cz::cyto_state& current_state,
         const cz::state_table& cell_tbl,
         const cz::neighborhood_indexer& cell_indexer,
-        const cz::state_table_row& vert_tbl,
-        const cz::neighborhood_indexer& vert_indexer,
+        const birth_parameters& birth,
         const cz::color_table& palette) {
 
     const auto snapshot = build_topology_snapshot(current_state);
@@ -993,14 +1027,7 @@ cz::state_table_result cz::apply_state_tables_animated(
         cell_indexer
     );
 
-    const auto add_list = apply_vertex_table(
-        id_source,
-        snapshot.graph,
-        snapshot.vertex_neighborhoods,
-        vert_tbl,
-        vert_indexer,
-        cell_tbl.size()
-    );
+    const auto add_list = do_cell_birth(birth, id_source, snapshot, cell_tbl.size());
 
     for (const auto& new_cell : add_list) {
         auto canonical_cell = new_cell;
@@ -1046,8 +1073,7 @@ cz::cyto_state cz::apply_state_tables_quick(
         const cz::cyto_state& current_state,
         const cz::state_table& cell_tbl,
         const cz::neighborhood_indexer& cell_indexer,
-        const cz::state_table_row& vert_tbl,
-        const cz::neighborhood_indexer& vert_indexer) {
+        const birth_parameters& birth) {
 
     const auto snapshot = build_topology_snapshot(current_state);
 
@@ -1057,14 +1083,7 @@ cz::cyto_state cz::apply_state_tables_quick(
         cell_indexer
     );
 
-    const auto add_list = apply_vertex_table(
-        id_source,
-        snapshot.graph,
-        snapshot.vertex_neighborhoods,
-        vert_tbl,
-        vert_indexer,
-        cell_tbl.size()
-    );
+    const auto add_list = do_cell_birth(birth, id_source, snapshot, cell_tbl.size());
 
     for (auto id : delete_set) {
         id_source.release(id);
@@ -1083,8 +1102,14 @@ cz::cyto_state cz::apply_state_tables_quick(
 cz::cyto_params::cyto_params() :
     cell_indexer{ indexer_from_name("sum of states")},
     cell_state_table(1, state_table_row(1, 0)),
-    vertex_indexer{ indexer_from_name("sum of states") },
-    vertex_table(state_table_row(1, 0)),
+    birth_params{
+        cz::birth_parameters {
+            vertex_based_birth{
+                .vertex_indexer = { indexer_from_name("sum of states") },
+                .vertex_table = state_table_row(1, 0)
+            }
+        }
+    },
     num_states{ 1 },
     num_initial_cells{10},
     initial_state_density{1.0},

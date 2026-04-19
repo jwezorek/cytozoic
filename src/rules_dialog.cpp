@@ -1,6 +1,7 @@
 #include "rules_dialog.hpp"
 #include "cytozoic.hpp"
 
+#include <QButtonGroup>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -11,9 +12,11 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QRandomGenerator>
+#include <QRadioButton>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QVBoxLayout>
@@ -87,11 +90,13 @@ namespace {
             result.reserve(colors_.size());
 
             for (const auto& color : colors_) {
-                result.push_back(cz::color{
-                    static_cast<uint8_t>(color.red()),
-                    static_cast<uint8_t>(color.green()),
-                    static_cast<uint8_t>(color.blue())
-                    });
+                result.push_back(
+                    cz::color{
+                        static_cast<uint8_t>(color.red()),
+                        static_cast<uint8_t>(color.green()),
+                        static_cast<uint8_t>(color.blue())
+                    }
+                );
             }
 
             return result;
@@ -182,6 +187,173 @@ namespace {
         std::vector<QLabel*> labels_;
         std::vector<QPushButton*> buttons_;
         std::vector<QColor> colors_;
+    };
+
+    class state_density_editor : public QWidget {
+    public:
+        explicit state_density_editor(QWidget* parent = nullptr)
+            : QWidget(parent)
+        {
+            auto* root = new QVBoxLayout(this);
+            root->setContentsMargins(0, 0, 0, 0);
+            layout_ = new QGridLayout();
+            root->addLayout(layout_);
+            root->addStretch();
+        }
+
+        void set_num_states(int num_states)
+        {
+            if (num_states < 1) {
+                num_states = 1;
+            }
+
+            while (sliders_.size() > static_cast<std::size_t>(num_states)) {
+                remove_last_row();
+            }
+
+            while (sliders_.size() < static_cast<std::size_t>(num_states)) {
+                add_row(static_cast<int>(sliders_.size()));
+            }
+
+            refresh_labels();
+        }
+
+        void set_density(const std::vector<double>& density)
+        {
+            if (sliders_.empty()) {
+                return;
+            }
+
+            std::vector<int> discrete(sliders_.size(), 0);
+
+            if (!density.empty()) {
+                const std::size_t count = std::min(density.size(), sliders_.size());
+
+                for (std::size_t i = 0; i < count; ++i) {
+                    discrete[i] = std::clamp(
+                        static_cast<int>(std::lround(density[i] * 100.0)),
+                        0,
+                        100
+                    );
+                }
+            }
+
+            if (std::ranges::all_of(discrete, [](int v) { return v == 0; })) {
+                discrete.front() = 100;
+            }
+
+            for (std::size_t i = 0; i < sliders_.size(); ++i) {
+                QSignalBlocker blocker(sliders_[i]);
+                sliders_[i]->setValue(discrete[i]);
+            }
+
+            refresh_labels();
+        }
+
+        std::vector<double> density() const
+        {
+            std::vector<double> result;
+            result.reserve(sliders_.size());
+
+            int total = 0;
+            for (const auto* slider : sliders_) {
+                total += slider->value();
+            }
+
+            if (total <= 0) {
+                result.resize(sliders_.size(), 0.0);
+                if (!result.empty()) {
+                    result[0] = 1.0;
+                }
+                return result;
+            }
+
+            for (const auto* slider : sliders_) {
+                result.push_back(
+                    static_cast<double>(slider->value()) /
+                    static_cast<double>(total)
+                );
+            }
+
+            return result;
+        }
+
+    private:
+        void add_row(int state_index)
+        {
+            auto* state_label = new QLabel(
+                QStringLiteral("State %1").arg(state_index),
+                this
+            );
+
+            auto* slider = new QSlider(Qt::Horizontal, this);
+            slider->setRange(0, 100);
+            slider->setValue(state_index == 0 ? 100 : 0);
+
+            auto* value_label = new QLabel(this);
+            value_label->setMinimumWidth(120);
+
+            const int row = static_cast<int>(sliders_.size());
+            layout_->addWidget(state_label, row, 0);
+            layout_->addWidget(slider, row, 1);
+            layout_->addWidget(value_label, row, 2);
+
+            labels_.push_back(state_label);
+            sliders_.push_back(slider);
+            value_labels_.push_back(value_label);
+
+            connect(
+                slider,
+                &QSlider::valueChanged,
+                this,
+                [this]() {
+                    refresh_labels();
+                }
+            );
+        }
+
+        void remove_last_row()
+        {
+            if (sliders_.empty()) {
+                return;
+            }
+
+            delete labels_.back();
+            delete sliders_.back();
+            delete value_labels_.back();
+
+            labels_.pop_back();
+            sliders_.pop_back();
+            value_labels_.pop_back();
+        }
+
+        void refresh_labels()
+        {
+            int total = 0;
+            for (const auto* slider : sliders_) {
+                total += slider->value();
+            }
+
+            for (std::size_t i = 0; i < sliders_.size(); ++i) {
+                labels_[i]->setText(QStringLiteral("State %1").arg(i));
+
+                const int raw = sliders_[i]->value();
+                const double normalized = total > 0
+                    ? static_cast<double>(raw) / static_cast<double>(total)
+                    : 0.0;
+
+                value_labels_[i]->setText(
+                    QStringLiteral("%1  (%2)")
+                    .arg(raw)
+                    .arg(normalized, 0, 'f', 3)
+                );
+            }
+        }
+
+        QGridLayout* layout_ = nullptr;
+        std::vector<QLabel*> labels_;
+        std::vector<QSlider*> sliders_;
+        std::vector<QLabel*> value_labels_;
     };
 
     int safe_cell_value(
@@ -420,173 +592,6 @@ namespace {
         combo->setCurrentIndex(combo->findData(clamped_old_value));
     }
 
-    class state_density_editor : public QWidget {
-    public:
-        explicit state_density_editor(QWidget* parent = nullptr)
-            : QWidget(parent)
-        {
-            auto* root = new QVBoxLayout(this);
-            root->setContentsMargins(0, 0, 0, 0);
-            layout_ = new QGridLayout();
-            root->addLayout(layout_);
-            root->addStretch();
-        }
-
-        void set_num_states(int num_states)
-        {
-            if (num_states < 1) {
-                num_states = 1;
-            }
-
-            while (sliders_.size() > static_cast<std::size_t>(num_states)) {
-                remove_last_row();
-            }
-
-            while (sliders_.size() < static_cast<std::size_t>(num_states)) {
-                add_row(static_cast<int>(sliders_.size()));
-            }
-
-            refresh_labels();
-        }
-
-        void set_density(const std::vector<double>& density)
-        {
-            if (sliders_.empty()) {
-                return;
-            }
-
-            std::vector<int> discrete(sliders_.size(), 0);
-
-            if (!density.empty()) {
-                const std::size_t count = std::min(density.size(), sliders_.size());
-
-                for (std::size_t i = 0; i < count; ++i) {
-                    discrete[i] = std::clamp(
-                        static_cast<int>(std::lround(density[i] * 100.0)),
-                        0,
-                        100
-                    );
-                }
-            }
-
-            if (std::ranges::all_of(discrete, [](int v) { return v == 0; })) {
-                discrete.front() = 100;
-            }
-
-            for (std::size_t i = 0; i < sliders_.size(); ++i) {
-                QSignalBlocker blocker(sliders_[i]);
-                sliders_[i]->setValue(discrete[i]);
-            }
-
-            refresh_labels();
-        }
-
-        std::vector<double> density() const
-        {
-            std::vector<double> result;
-            result.reserve(sliders_.size());
-
-            int total = 0;
-            for (const auto* slider : sliders_) {
-                total += slider->value();
-            }
-
-            if (total <= 0) {
-                result.resize(sliders_.size(), 0.0);
-                if (!result.empty()) {
-                    result[0] = 1.0;
-                }
-                return result;
-            }
-
-            for (const auto* slider : sliders_) {
-                result.push_back(
-                    static_cast<double>(slider->value()) /
-                    static_cast<double>(total)
-                );
-            }
-
-            return result;
-        }
-
-    private:
-        void add_row(int state_index)
-        {
-            auto* state_label = new QLabel(
-                QStringLiteral("State %1").arg(state_index),
-                this
-            );
-
-            auto* slider = new QSlider(Qt::Horizontal, this);
-            slider->setRange(0, 100);
-            slider->setValue(state_index == 0 ? 100 : 0);
-
-            auto* value_label = new QLabel(this);
-            value_label->setMinimumWidth(120);
-
-            const int row = static_cast<int>(sliders_.size());
-            layout_->addWidget(state_label, row, 0);
-            layout_->addWidget(slider, row, 1);
-            layout_->addWidget(value_label, row, 2);
-
-            labels_.push_back(state_label);
-            sliders_.push_back(slider);
-            value_labels_.push_back(value_label);
-
-            connect(
-                slider,
-                &QSlider::valueChanged,
-                this,
-                [this]() {
-                    refresh_labels();
-                }
-            );
-        }
-
-        void remove_last_row()
-        {
-            if (sliders_.empty()) {
-                return;
-            }
-
-            delete labels_.back();
-            delete sliders_.back();
-            delete value_labels_.back();
-
-            labels_.pop_back();
-            sliders_.pop_back();
-            value_labels_.pop_back();
-        }
-
-        void refresh_labels()
-        {
-            int total = 0;
-            for (const auto* slider : sliders_) {
-                total += slider->value();
-            }
-
-            for (std::size_t i = 0; i < sliders_.size(); ++i) {
-                labels_[i]->setText(QStringLiteral("State %1").arg(i));
-
-                const int raw = sliders_[i]->value();
-                const double normalized = total > 0
-                    ? static_cast<double>(raw) / static_cast<double>(total)
-                    : 0.0;
-
-                value_labels_[i]->setText(
-                    QStringLiteral("%1  (%2)")
-                    .arg(raw)
-                    .arg(normalized, 0, 'f', 3)
-                );
-            }
-        }
-
-        QGridLayout* layout_ = nullptr;
-        std::vector<QLabel*> labels_;
-        std::vector<QSlider*> sliders_;
-        std::vector<QLabel*> value_labels_;
-    };
-
     void randomize_vertex_table_impl(
         QTableWidget* table,
         int num_states,
@@ -630,7 +635,58 @@ namespace {
         }
     }
 
+    QString center_type_to_string(cz::center_type type)
+    {
+        switch (type) {
+        case cz::center_type::incircle:
+            return QStringLiteral("incircle");
+
+        case cz::center_type::johnson_ellipse:
+            return QStringLiteral("johnson ellipse");
+
+        case cz::center_type::center_of_mass:
+            return QStringLiteral("center of mass");
+        }
+
+        return QStringLiteral("incircle");
+    }
+
+    cz::center_type center_type_from_combo(const QComboBox* combo)
+    {
+        const QString value = combo->currentData().toString();
+
+        if (value == QStringLiteral("johnson_ellipse")) {
+            return cz::center_type::johnson_ellipse;
+        }
+
+        if (value == QStringLiteral("center_of_mass")) {
+            return cz::center_type::center_of_mass;
+        }
+
+        return cz::center_type::incircle;
+    }
+
 } // namespace
+
+void cz::rules_dialog::refresh_birth_mode_ui()
+{
+    if (birth_mode_stack_ == nullptr) {
+        return;
+    }
+
+    if (vertex_birth_radio_ != nullptr && vertex_birth_radio_->isChecked()) {
+        birth_mode_stack_->setCurrentWidget(vertex_birth_page_);
+        if (tabs_ != nullptr && birth_tab_ != nullptr) {
+            tabs_->setTabText(tabs_->indexOf(birth_tab_), tr("Vertex Birth"));
+        }
+    }
+    else {
+        birth_mode_stack_->setCurrentWidget(cell_birth_page_);
+        if (tabs_ != nullptr && birth_tab_ != nullptr) {
+            tabs_->setTabText(tabs_->indexOf(birth_tab_), tr("Cell Birth"));
+        }
+    }
+}
 
 void cz::rules_dialog::rebuild_tables()
 {
@@ -643,17 +699,10 @@ void cz::rules_dialog::rebuild_tables()
 
     const auto cell_indexer =
         make_indexer_from_dialog_name(cell_indexer_combo_->currentText());
-    const auto vertex_indexer =
-        make_indexer_from_dialog_name(vert_indexer_combo_->currentText());
 
     const int cell_columns =
         static_cast<int>(
             cell_indexer->num_columns(static_cast<std::size_t>(num_states))
-            );
-
-    const int vertex_columns =
-        static_cast<int>(
-            vertex_indexer->num_columns(static_cast<std::size_t>(num_states))
             );
 
     rebuild_state_table(
@@ -664,17 +713,40 @@ void cz::rules_dialog::rebuild_tables()
         max_value
     );
 
-    rebuild_state_table(
-        vertex_table_,
-        1,
-        vertex_columns,
-        min_value,
-        max_value
-    );
+    if (vert_indexer_combo_ != nullptr) {
+        const auto vertex_indexer =
+            make_indexer_from_dialog_name(vert_indexer_combo_->currentText());
 
-    if (auto* birth_combo = findChild<QComboBox*>("vertex_birth_probability_combo")) {
-        refresh_vertex_birth_count_combo(birth_combo, vertex_columns);
+        const int vertex_columns =
+            static_cast<int>(
+                vertex_indexer->num_columns(static_cast<std::size_t>(num_states))
+                );
+
+        rebuild_state_table(
+            vertex_table_,
+            1,
+            vertex_columns,
+            min_value,
+            max_value
+        );
+
+        refresh_vertex_birth_count_combo(
+            vertex_birth_probability_combo_,
+            vertex_columns
+        );
     }
+
+    if (cell_birth_table_ != nullptr) {
+        rebuild_state_table(
+            cell_birth_table_,
+            num_states,
+            1,
+            min_value,
+            max_value
+        );
+    }
+
+    refresh_birth_mode_ui();
 }
 
 cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
@@ -685,8 +757,8 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
     resize(1100, 700);
 
     auto* root_layout = new QVBoxLayout(this);
-    auto* tabs = new QTabWidget(this);
-    root_layout->addWidget(tabs);
+    tabs_ = new QTabWidget(this);
+    root_layout->addWidget(tabs_);
 
     auto* buttons = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
@@ -697,7 +769,11 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
-    auto* initial_tab = new QWidget(tabs);
+    //----------------------------------------------------------------------
+    // Initial configuration tab
+    //----------------------------------------------------------------------
+
+    auto* initial_tab = new QWidget(tabs_);
     auto* initial_layout = new QVBoxLayout(initial_tab);
     auto* initial_grid = new QGridLayout();
     initial_layout->addLayout(initial_grid);
@@ -721,6 +797,23 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
     auto* palette_editor =
         static_cast<::palette_editor*>(palette_editor_widget_);
 
+    auto* birth_mode_label = new QLabel(tr("Birth mode"), initial_tab);
+    auto* birth_mode_widget = new QWidget(initial_tab);
+    auto* birth_mode_layout = new QVBoxLayout(birth_mode_widget);
+    birth_mode_layout->setContentsMargins(0, 0, 0, 0);
+
+    vertex_birth_radio_ =
+        new QRadioButton(tr("Vertex-based birth"), birth_mode_widget);
+    cell_birth_radio_ =
+        new QRadioButton(tr("Cell-based birth"), birth_mode_widget);
+
+    auto* birth_mode_group = new QButtonGroup(this);
+    birth_mode_group->addButton(vertex_birth_radio_);
+    birth_mode_group->addButton(cell_birth_radio_);
+
+    birth_mode_layout->addWidget(vertex_birth_radio_);
+    birth_mode_layout->addWidget(cell_birth_radio_);
+
     initial_grid->addWidget(num_states_label, 0, 0);
     initial_grid->addWidget(num_states_combo_, 0, 1);
     initial_grid->addWidget(num_initial_cells_label, 1, 0);
@@ -729,11 +822,17 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
     initial_grid->addWidget(density_editor, 2, 1);
     initial_grid->addWidget(palette_label, 3, 0, Qt::AlignTop);
     initial_grid->addWidget(palette_editor, 3, 1);
+    initial_grid->addWidget(birth_mode_label, 4, 0, Qt::AlignTop);
+    initial_grid->addWidget(birth_mode_widget, 4, 1);
 
     initial_layout->addStretch();
-    tabs->addTab(initial_tab, tr("Initial Configuration"));
+    tabs_->addTab(initial_tab, tr("Initial Configuration"));
 
-    auto* cell_tab = new QWidget(tabs);
+    //----------------------------------------------------------------------
+    // Cell table tab
+    //----------------------------------------------------------------------
+
+    auto* cell_tab = new QWidget(tabs_);
     auto* cell_layout = new QVBoxLayout(cell_tab);
     auto* cell_top_row = new QHBoxLayout();
 
@@ -772,14 +871,27 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
     cell_layout->addLayout(cell_top_row);
     cell_layout->addWidget(cell_table_);
     cell_layout->addWidget(cell_random_group);
-    tabs->addTab(cell_tab, tr("Cell Table"));
+    tabs_->addTab(cell_tab, tr("Cell Table"));
 
-    auto* vertex_tab = new QWidget(tabs);
-    auto* vertex_layout = new QVBoxLayout(vertex_tab);
+    //----------------------------------------------------------------------
+    // Birth tab
+    //----------------------------------------------------------------------
+
+    birth_tab_ = new QWidget(tabs_);
+    auto* birth_layout = new QVBoxLayout(birth_tab_);
+
+    birth_mode_stack_ = new QStackedWidget(birth_tab_);
+
+    //----------------------------------------------------------------------
+    // Vertex-based birth page
+    //----------------------------------------------------------------------
+
+    vertex_birth_page_ = new QWidget(birth_mode_stack_);
+    auto* vertex_layout = new QVBoxLayout(vertex_birth_page_);
     auto* vertex_top_row = new QHBoxLayout();
 
-    auto* vertex_indexer_label = new QLabel(tr("Indexer"), vertex_tab);
-    vert_indexer_combo_ = new QComboBox(vertex_tab);
+    auto* vertex_indexer_label = new QLabel(tr("Indexer"), vertex_birth_page_);
+    vert_indexer_combo_ = new QComboBox(vertex_birth_page_);
     for (const auto& name : cz::named_indexers()) {
         vert_indexer_combo_->addItem(QString::fromStdString(name));
     }
@@ -788,25 +900,22 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
     vertex_top_row->addWidget(vert_indexer_combo_);
     vertex_top_row->addStretch();
 
-    vertex_table_ = new QTableWidget(vertex_tab);
+    vertex_table_ = new QTableWidget(vertex_birth_page_);
     vertex_table_->setAlternatingRowColors(true);
 
     auto* vertex_random_group =
-        new QGroupBox(tr("Random Generation"), vertex_tab);
+        new QGroupBox(tr("Random Generation"), vertex_birth_page_);
     auto* vertex_random_layout = new QHBoxLayout(vertex_random_group);
 
     auto* vertex_birth_probability_label =
         new QLabel(tr("Birth probability"), vertex_random_group);
-    auto* vertex_birth_probability_combo = new QComboBox(vertex_random_group);
-    vertex_birth_probability_combo->setObjectName(
-        "vertex_birth_probability_combo"
-    );
+    vertex_birth_probability_combo_ = new QComboBox(vertex_random_group);
 
     auto* vertex_randomize_button =
         new QPushButton(tr("Generate Random States"), vertex_random_group);
 
     vertex_random_layout->addWidget(vertex_birth_probability_label);
-    vertex_random_layout->addWidget(vertex_birth_probability_combo);
+    vertex_random_layout->addWidget(vertex_birth_probability_combo_);
     vertex_random_layout->addSpacing(16);
     vertex_random_layout->addWidget(vertex_randomize_button);
     vertex_random_layout->addStretch();
@@ -814,7 +923,55 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
     vertex_layout->addLayout(vertex_top_row);
     vertex_layout->addWidget(vertex_table_);
     vertex_layout->addWidget(vertex_random_group);
-    tabs->addTab(vertex_tab, tr("Vertex Table"));
+
+    //----------------------------------------------------------------------
+    // Cell-based birth page
+    //----------------------------------------------------------------------
+
+    cell_birth_page_ = new QWidget(birth_mode_stack_);
+    auto* cell_birth_layout = new QVBoxLayout(cell_birth_page_);
+    auto* cell_birth_top_grid = new QGridLayout();
+
+    auto* cell_spawn_site_label =
+        new QLabel(tr("Spawn site"), cell_birth_page_);
+    cell_spawn_site_combo_ = new QComboBox(cell_birth_page_);
+    cell_spawn_site_combo_->addItem(tr("Incircle"), QStringLiteral("incircle"));
+    cell_spawn_site_combo_->addItem(
+        tr("Johnson ellipse"),
+        QStringLiteral("johnson_ellipse")
+    );
+    cell_spawn_site_combo_->addItem(
+        tr("Center of mass"),
+        QStringLiteral("center_of_mass")
+    );
+
+    auto* cell_birth_info = new QLabel(
+        tr("Cell-based birth is not yet implemented in the simulation core. "
+            "These controls are present so the dialog matches the new params "
+            "layout and can round-trip the new variant type."),
+        cell_birth_page_
+    );
+    cell_birth_info->setWordWrap(true);
+
+    cell_birth_table_ = new QTableWidget(cell_birth_page_);
+    cell_birth_table_->setAlternatingRowColors(true);
+
+    cell_birth_top_grid->addWidget(cell_spawn_site_label, 0, 0);
+    cell_birth_top_grid->addWidget(cell_spawn_site_combo_, 0, 1);
+
+    cell_birth_layout->addLayout(cell_birth_top_grid);
+    cell_birth_layout->addWidget(cell_birth_info);
+    cell_birth_layout->addWidget(cell_birth_table_);
+
+    birth_mode_stack_->addWidget(vertex_birth_page_);
+    birth_mode_stack_->addWidget(cell_birth_page_);
+    birth_layout->addWidget(birth_mode_stack_);
+
+    tabs_->addTab(birth_tab_, tr("Birth"));
+
+    //----------------------------------------------------------------------
+    // Initialization from current params
+    //----------------------------------------------------------------------
 
     num_states_combo_->setCurrentIndex(
         std::max(0, num_states_combo_->findData(params.num_states))
@@ -834,16 +991,48 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
         )
     );
 
-    vert_indexer_combo_->setCurrentText(
-        indexer_name_or_default(
-            params.vertex_indexer,
-            QStringLiteral("sum of states")
-        )
-    );
+    if (const auto* vertex_birth =
+        std::get_if<cz::vertex_based_birth>(&params.birth_params)) {
+        vertex_birth_radio_->setChecked(true);
+
+        vert_indexer_combo_->setCurrentText(
+            indexer_name_or_default(
+                vertex_birth->vertex_indexer,
+                QStringLiteral("sum of states")
+            )
+        );
+    }
+    else if (const auto* cell_birth =
+        std::get_if<cz::cell_based_birth>(&params.birth_params)) {
+        cell_birth_radio_->setChecked(true);
+        cell_spawn_site_combo_->setCurrentText(
+            center_type_to_string(cell_birth->spawn_site)
+        );
+    }
+    else {
+        vertex_birth_radio_->setChecked(true);
+    }
 
     rebuild_tables();
     set_state_table_values(cell_table_, params.cell_state_table);
-    set_state_table_row_values(vertex_table_, params.vertex_table);
+
+    if (const auto* vertex_birth =
+        std::get_if<cz::vertex_based_birth>(&params.birth_params)) {
+        set_state_table_row_values(
+            vertex_table_,
+            vertex_birth->vertex_table
+        );
+    }
+
+    if (const auto* cell_birth =
+        std::get_if<cz::cell_based_birth>(&params.birth_params)) {
+        set_state_table_values(
+            cell_birth_table_,
+            cell_birth->state_table
+        );
+    }
+
+    refresh_birth_mode_ui();
 
     connect(
         num_states_combo_,
@@ -869,6 +1058,24 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
         this,
         [&](int) {
             rebuild_tables();
+        }
+    );
+
+    connect(
+        vertex_birth_radio_,
+        &QRadioButton::toggled,
+        this,
+        [&](bool) {
+            refresh_birth_mode_ui();
+        }
+    );
+
+    connect(
+        cell_birth_radio_,
+        &QRadioButton::toggled,
+        this,
+        [&](bool) {
+            refresh_birth_mode_ui();
         }
     );
 
@@ -901,11 +1108,11 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
         vertex_randomize_button,
         &QPushButton::clicked,
         this,
-        [this, vertex_birth_probability_combo]() {
+        [this]() {
             randomize_vertex_table_impl(
                 vertex_table_,
                 num_states_combo_->currentData().toInt(),
-                vertex_birth_probability_combo->currentData().toInt()
+                vertex_birth_probability_combo_->currentData().toInt()
             );
         }
     );
@@ -924,11 +1131,22 @@ cz::cyto_params cz::rules_dialog::get() const
 
     edited.cell_indexer =
         make_indexer_from_dialog_name(cell_indexer_combo_->currentText());
-    edited.vertex_indexer =
-        make_indexer_from_dialog_name(vert_indexer_combo_->currentText());
 
     edited.cell_state_table = read_state_table(cell_table_);
-    edited.vertex_table = read_state_table_row(vertex_table_);
+
+    if (vertex_birth_radio_ != nullptr && vertex_birth_radio_->isChecked()) {
+        edited.birth_params = cz::vertex_based_birth{
+            .vertex_indexer =
+                make_indexer_from_dialog_name(vert_indexer_combo_->currentText()),
+            .vertex_table = read_state_table_row(vertex_table_)
+        };
+    }
+    else {
+        edited.birth_params = cz::cell_based_birth{
+            .spawn_site = center_type_from_combo(cell_spawn_site_combo_),
+            .state_table = read_state_table(cell_birth_table_)
+        };
+    }
 
     return edited;
 }

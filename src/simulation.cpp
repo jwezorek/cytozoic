@@ -10,58 +10,6 @@ namespace {
 
     constexpr int k_min_frame_spacing_ms = 16;
 
-    void validate_loaded_params(const cz::cyto_params& params)
-    {
-        if (params.num_states <= 0) {
-            throw std::runtime_error("num_states must be positive.");
-        }
-
-        if (!params.cell_indexer) {
-            throw std::runtime_error("missing cell_indexer.");
-        }
-
-        if (!params.vertex_indexer) {
-            throw std::runtime_error("missing vertex_indexer.");
-        }
-
-        if (params.cell_state_table.size() !=
-            static_cast<std::size_t>(params.num_states)) {
-            throw std::runtime_error(
-                "cell_state_table row count must equal num_states."
-            );
-        }
-
-        const std::size_t expected_cell_columns =
-            params.cell_indexer->num_columns(
-                static_cast<std::size_t>(params.num_states)
-            );
-
-        for (const auto& row : params.cell_state_table) {
-            if (row.size() != expected_cell_columns) {
-                throw std::runtime_error(
-                    "cell_state_table width does not match cell_indexer."
-                );
-            }
-        }
-
-        const std::size_t expected_vertex_columns =
-            params.vertex_indexer->num_columns(
-                static_cast<std::size_t>(params.num_states)
-            );
-
-        if (params.vertex_table.size() != expected_vertex_columns) {
-            throw std::runtime_error(
-                "vertex_table width does not match vertex_indexer."
-            );
-        }
-
-        if (params.palette.size() <
-            static_cast<std::size_t>(params.num_states)) {
-            throw std::runtime_error(
-                "palette must contain at least num_states colors."
-            );
-        }
-    }
 
 } // namespace
 
@@ -161,8 +109,7 @@ void cz::simulation_thread::run()
                     current_state_,
                     params.cell_state_table,
                     params.cell_indexer,
-                    params.vertex_table,
-                    params.vertex_indexer,
+                    params.birth_params,
                     params.palette
                 );
 
@@ -198,8 +145,7 @@ void cz::simulation_thread::run()
                     current_state_,
                     params.cell_state_table,
                     params.cell_indexer,
-                    params.vertex_table,
-                    params.vertex_indexer
+                    params.birth_params
                 );
 
                 if (is_stop_requested()) {
@@ -232,7 +178,7 @@ void cz::simulation_thread::run()
 
 void cz::simulation_thread::validate_params(const cyto_params& params) const
 {
-    validate_loaded_params(params);
+    //TODO: call a function in cytozoic.cpp to do this...
 }
 
 bool cz::simulation_thread::is_stop_requested() const

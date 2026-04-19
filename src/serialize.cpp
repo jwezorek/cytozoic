@@ -1,6 +1,9 @@
 #include "serialize.hpp"
 #include "third-party/json.hpp"
+
 #include <fstream>
+#include <stdexcept>
+#include <string>
 
 /*------------------------------------------------------------------------------------------------*/
 
@@ -134,12 +137,56 @@ namespace {
         return j;
     }
 
-}
+    std::string birth_mode_to_string(
+        const std::variant<cz::vertex_based_birth, cz::cell_based_birth>& birth_params)
+    {
+        if (std::holds_alternative<cz::vertex_based_birth>(birth_params)) {
+            return "vertex_based";
+        }
 
-bool cz::save_ruleset_to_file( const std::string& file_path, const cyto_params& params ) {
+        return "cell_based";
+    }
 
+    std::string center_type_to_string(cz::center_type type)
+    {
+        switch (type) {
+        case cz::center_type::incircle:
+            return "incircle";
+
+        case cz::center_type::johnson_ellipse:
+            return "johnson_ellipse";
+
+        case cz::center_type::center_of_mass:
+            return "center_of_mass";
+        }
+
+        throw std::runtime_error("unrecognized center_type.");
+    }
+
+    cz::center_type center_type_from_string(const std::string& value)
+    {
+        if (value == "incircle") {
+            return cz::center_type::incircle;
+        }
+
+        if (value == "johnson_ellipse") {
+            return cz::center_type::johnson_ellipse;
+        }
+
+        if (value == "center_of_mass") {
+            return cz::center_type::center_of_mass;
+        }
+
+        throw std::runtime_error("unrecognized center_type string.");
+    }
+
+} // namespace
+
+bool cz::save_ruleset_to_file(
+    const std::string& file_path,
+    const cyto_params& params)
+{
     try {
-
         json j = {
             { "format", "cytozoic_ruleset" },
             { "version", 1 },
@@ -149,9 +196,22 @@ bool cz::save_ruleset_to_file( const std::string& file_path, const cyto_params& 
             { "palette", color_table_to_json(params.palette) },
             { "cell_indexer", params.cell_indexer->name() },
             { "cell_state_table", state_table_to_json(params.cell_state_table) },
-            { "vertex_indexer", params.vertex_indexer->name() },
-            { "vertex_table", state_table_row_to_json(params.vertex_table) }
+            { "birth_mode", birth_mode_to_string(params.birth_params) }
         };
+
+        if (const auto* vertex_birth =
+            std::get_if<cz::vertex_based_birth>(&params.birth_params)) {
+            j["vertex_indexer"] = vertex_birth->vertex_indexer->name();
+            j["vertex_table"] = state_table_row_to_json(vertex_birth->vertex_table);
+        }
+        else if (const auto* cell_birth =
+            std::get_if<cz::cell_based_birth>(&params.birth_params)) {
+            j["spawn_site"] = center_type_to_string(cell_birth->spawn_site);
+            j["birth_state_table"] = state_table_to_json(cell_birth->state_table);
+        }
+        else {
+            throw std::runtime_error("unrecognized birth_params variant.");
+        }
 
         std::ofstream file(file_path, std::ios::binary | std::ios::trunc);
         if (!file) {
@@ -162,16 +222,14 @@ bool cz::save_ruleset_to_file( const std::string& file_path, const cyto_params& 
         file.close();
 
         return true;
-
-    } catch (const std::exception& ex) {
-
+    }
+    catch (const std::exception&) {
         return false;
     }
-
 }
 
-std::optional<cz::cyto_params> cz::load_ruleset_from_file(const std::string& file_path) {
-
+std::optional<cz::cyto_params> cz::load_ruleset_from_file(const std::string& file_path)
+{
     try {
         std::ifstream file(file_path, std::ios::binary);
 
@@ -211,20 +269,39 @@ std::optional<cz::cyto_params> cz::load_ruleset_from_file(const std::string& fil
             j.at("cell_indexer").get<std::string>()
         );
 
-        loaded.vertex_indexer = cz::indexer_from_name(
-            j.at("vertex_indexer").get<std::string>()
-        );
-
         loaded.cell_state_table =
             state_table_from_json(j.at("cell_state_table"));
 
-        loaded.vertex_table =
-            state_table_row_from_json(j.at("vertex_table"));
+        const std::string birth_mode =
+            j.value("birth_mode", std::string("vertex_based"));
+
+        if (birth_mode == "vertex_based") {
+            loaded.birth_params = cz::vertex_based_birth{
+                .vertex_indexer = cz::indexer_from_name(
+                    j.at("vertex_indexer").get<std::string>()
+                ),
+                .vertex_table = state_table_row_from_json(
+                    j.at("vertex_table")
+                )
+            };
+        }
+        else if (birth_mode == "cell_based") {
+            loaded.birth_params = cz::cell_based_birth{
+                .spawn_site = center_type_from_string(
+                    j.at("spawn_site").get<std::string>()
+                ),
+                .state_table = state_table_from_json(
+                    j.at("birth_state_table")
+                )
+            };
+        }
+        else {
+            throw std::runtime_error("unrecognized birth_mode.");
+        }
 
         return loaded;
-
-    } catch (const std::exception& ex) {
+    }
+    catch (const std::exception&) {
         return {};
     }
-
 }

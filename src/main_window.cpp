@@ -17,6 +17,8 @@ namespace {
 
     void validate_loaded_params(const cz::cyto_params& params)
     {
+        // TODO: validate the birth_parameters variant
+
         if (params.num_states <= 0) {
             throw std::runtime_error("num_states must be positive.");
         }
@@ -25,9 +27,11 @@ namespace {
             throw std::runtime_error("missing cell_indexer.");
         }
 
+        /*
         if (!params.vertex_indexer) {
             throw std::runtime_error("missing vertex_indexer.");
         }
+        */
 
         if (params.cell_state_table.size() !=
             static_cast<std::size_t>(params.num_states)) {
@@ -49,6 +53,7 @@ namespace {
             }
         }
 
+        /*
         const std::size_t expected_vertex_columns =
             params.vertex_indexer->num_columns(
                 static_cast<std::size_t>(params.num_states)
@@ -59,6 +64,7 @@ namespace {
                 "vertex_table width does not match vertex_indexer."
             );
         }
+        */
 
         if (params.palette.size() <
             static_cast<std::size_t>(params.num_states)) {

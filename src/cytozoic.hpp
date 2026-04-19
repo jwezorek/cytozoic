@@ -3,6 +3,7 @@
 #include "geometry.hpp"
 #include "neighborhood_indexer.hpp"
 #include <optional>
+#include <variant>
 
 /*------------------------------------------------------------------------------------------------*/
 
@@ -102,13 +103,44 @@ namespace cz {
         cyto_frame anim_end;
     };
 
+    enum class center_type {
+        incircle,
+        johnson_ellipse,
+        center_of_mass
+    };
+
+    struct cell_based_birth {
+        center_type spawn_site;
+        state_table state_table;
+    };
+
+    struct vertex_based_birth {
+        neighborhood_indexer vertex_indexer;
+        state_table_row vertex_table;
+    };
+
+    using birth_parameters = std::variant<vertex_based_birth, cell_based_birth>;
+
+    struct cyto_params {
+
+        neighborhood_indexer cell_indexer;
+        state_table cell_state_table;
+        int num_states;
+        int num_initial_cells;
+        std::vector<double> initial_state_density;
+        color_table palette;
+        birth_parameters birth_params;
+
+        cyto_params();
+
+    };
+
     state_table_result apply_state_tables_animated(
         cell_id_source& id_source,
         const cyto_state& state,
         const state_table& cell_tbl,
         const neighborhood_indexer& cell_indexer,
-        const state_table_row& vert_tbl,
-        const neighborhood_indexer& vert_indexer,
+        const birth_parameters& birth,
         const color_table& palette
     );
 
@@ -117,21 +149,7 @@ namespace cz {
         const cyto_state& state,
         const state_table& cell_tbl,
         const neighborhood_indexer& cell_indexer,
-        const state_table_row& vert_tbl,
-        const neighborhood_indexer& vert_indexer
+        const birth_parameters& birth
     );
-
-    struct cyto_params {
-        neighborhood_indexer cell_indexer;
-        state_table cell_state_table;
-        neighborhood_indexer vertex_indexer;
-        state_table_row vertex_table;
-        int num_states;
-        int num_initial_cells;
-        std::vector<double> initial_state_density;
-        color_table palette;
-
-        cyto_params();
-    };
 
 }
