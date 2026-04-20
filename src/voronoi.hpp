@@ -47,6 +47,7 @@ namespace cz {
         std::span<const point> sites,
         double min_delta_thresh,
         int max_iterations,
+        center_type ct = center_type::area_centroid,
         const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
     );
 
@@ -69,6 +70,7 @@ namespace cz {
         std::span<const weighted_point> sites,
         double min_delta_thresh,
         int max_iterations,
+        center_type ct = center_type::area_centroid,
         const rect& bounds = { {0.0, 0.0}, {1.0, 1.0} }
     );
 

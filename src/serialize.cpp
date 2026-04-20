@@ -147,39 +147,6 @@ namespace {
         return "cell_based";
     }
 
-    std::string center_type_to_string(cz::center_type type)
-    {
-        switch (type) {
-        case cz::center_type::incircle:
-            return "incircle";
-
-        case cz::center_type::johnson_ellipse:
-            return "johnson_ellipse";
-
-        case cz::center_type::center_of_mass:
-            return "center_of_mass";
-        }
-
-        throw std::runtime_error("unrecognized center_type.");
-    }
-
-    cz::center_type center_type_from_string(const std::string& value)
-    {
-        if (value == "incircle") {
-            return cz::center_type::incircle;
-        }
-
-        if (value == "johnson_ellipse") {
-            return cz::center_type::johnson_ellipse;
-        }
-
-        if (value == "center_of_mass") {
-            return cz::center_type::center_of_mass;
-        }
-
-        throw std::runtime_error("unrecognized center_type string.");
-    }
-
 } // namespace
 
 bool cz::save_ruleset_to_file(

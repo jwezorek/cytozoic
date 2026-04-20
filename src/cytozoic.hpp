@@ -103,12 +103,6 @@ namespace cz {
         cyto_frame anim_end;
     };
 
-    enum class center_type {
-        incircle,
-        johnson_ellipse,
-        center_of_mass
-    };
-
     struct cell_based_birth {
         center_type spawn_site;
         state_table state_table;

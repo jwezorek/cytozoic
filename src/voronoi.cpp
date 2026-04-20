@@ -910,13 +910,14 @@ namespace
 
     template<typename Site, typename GetPoint, typename RebindPoint>
     std::vector<Site> perform_lloyd_relaxation_impl(
-        std::span<const Site> sites,
-        double min_delta_thresh,
-        int max_iterations,
-        const cz::rect& bounds,
-        GetPoint get_point,
-        RebindPoint rebind_point)
-    {
+            std::span<const Site> sites,
+            double min_delta_thresh,
+            int max_iterations,
+            const cz::rect& bounds,
+            cz::center_type ct,
+            GetPoint get_point,
+            RebindPoint rebind_point) {
+
         if (sites.empty()) {
             return {};
         }
@@ -929,29 +930,30 @@ namespace
             const auto polygons = cz::to_voronoi_polygons(input, bounds);
 
             max_delta = r::max(
-                rv::zip(polygons, input)
-                | rv::transform([&](const auto& pair) -> double {
-                    const auto& [poly, site] = pair;
+                rv::zip(polygons, input) | rv::transform(
+                    [&](const auto& pair) -> double {
+                        const auto& [poly, site] = pair;
 
-                    if (poly.empty()) {
-                        return 0.0;
+                        if (poly.empty()) {
+                            return 0.0;
+                        }
+
+                        return cz::distance(cz::center(poly, ct), get_point(site));
                     }
-
-                    return cz::distance(cz::centroid(poly), get_point(site));
-                    })
+                )
             );
 
-            input = rv::zip(polygons, input)
-                | rv::transform([&](const auto& pair) -> Site {
-                const auto& [poly, site] = pair;
+            input = rv::zip(polygons, input) | rv::transform(
+                    [&](const auto& pair) -> Site {
+                        const auto& [poly, site] = pair;
 
-                if (poly.empty()) {
-                    return site;
-                }
+                        if (poly.empty()) {
+                            return site;
+                        }
 
-                return rebind_point(site, cz::centroid(poly));
-                    })
-                | r::to<std::vector>();
+                        return rebind_point(site, cz::center(poly, ct));
+                    }
+                ) | r::to<std::vector>();
         }
 
         return input;
@@ -962,9 +964,9 @@ namespace
 /*------------------------------------------------------------------------------------------------*/
 
 std::vector<std::vector<std::size_t>> cz::to_voronoi_topology(
-    std::span<const point> sites,
-    const rect& bounds)
-{
+        std::span<const point> sites,
+        const rect& bounds) {
+
     if (sites.empty()) {
         return {};
     }
@@ -977,37 +979,42 @@ std::vector<std::vector<std::size_t>> cz::to_voronoi_topology(
 }
 
 std::vector<cz::polygon> cz::to_voronoi_polygons(
-    std::span<const point> sites,
-    const rect& bounds)
-{
+        std::span<const point> sites,
+        const rect& bounds){
+
     return build_point_voronoi_diagram(sites, bounds, embedding_mode::omit).polygons;
+
 }
 
 cz::voronoi_diagram cz::to_voronoi_diagram(
-    std::span<const point> sites,
-    const rect& bounds)
-{
+        std::span<const point> sites,
+        const rect& bounds) {
+
     return build_point_voronoi_diagram(sites, bounds, embedding_mode::build);
+
 }
 
 cz::voronoi_embedding cz::to_voronoi_embedding(
-    std::span<const point> sites,
-    const rect& bounds)
-{
+        std::span<const point> sites,
+        const rect& bounds) {
+
     return to_voronoi_diagram(sites, bounds).embedding;
+
 }
 
 std::vector<cz::point> cz::perform_lloyd_relaxation(
-    std::span<const point> sites,
-    double min_delta_thresh,
-    int max_iterations,
-    const rect& bounds)
-{
+        std::span<const point> sites,
+        double min_delta_thresh,
+        int max_iterations,
+        center_type ct,
+        const rect& bounds) {
+
     return perform_lloyd_relaxation_impl(
         sites,
         min_delta_thresh,
         max_iterations,
         bounds,
+        ct,
         [](const cz::point& p) -> cz::point {
             return p;
         },
@@ -1015,12 +1022,13 @@ std::vector<cz::point> cz::perform_lloyd_relaxation(
             return new_pt;
         }
     );
+
 }
 
 std::vector<std::vector<std::size_t>> cz::to_voronoi_topology(
-    std::span<const weighted_point> sites,
-    const rect& bounds)
-{
+        std::span<const weighted_point> sites,
+        const rect& bounds) {
+
     if (sites.empty()) {
         return {};
     }
@@ -1031,40 +1039,46 @@ std::vector<std::vector<std::size_t>> cz::to_voronoi_topology(
 
     const auto diagram = to_voronoi_diagram(sites, bounds);
     return diagram.graph;
+
 }
 
 std::vector<cz::polygon> cz::to_voronoi_polygons(
-    std::span<const weighted_point> sites,
-    const rect& bounds)
-{
+        std::span<const weighted_point> sites,
+        const rect& bounds) {
+
     return build_weighted_voronoi_diagram(sites, bounds, embedding_mode::omit).polygons;
+
 }
 
 cz::voronoi_diagram cz::to_voronoi_diagram(
-    std::span<const weighted_point> sites,
-    const rect& bounds)
-{
+        std::span<const weighted_point> sites,
+        const rect& bounds) {
+
     return build_weighted_voronoi_diagram(sites, bounds, embedding_mode::build);
+
 }
 
 cz::voronoi_embedding cz::to_voronoi_embedding(
-    std::span<const weighted_point> sites,
-    const rect& bounds)
-{
+        std::span<const weighted_point> sites,
+        const rect& bounds) {
+
     return to_voronoi_diagram(sites, bounds).embedding;
+
 }
 
 std::vector<cz::point> cz::perform_lloyd_relaxation(
-    std::span<const weighted_point> sites,
-    double min_delta_thresh,
-    int max_iterations,
-    const rect& bounds)
-{
+       std::span<const weighted_point> sites,
+       double min_delta_thresh,
+       int max_iterations,
+       center_type ct,
+       const rect& bounds) {
+
     auto relaxed = perform_lloyd_relaxation_impl(
         sites,
         min_delta_thresh,
         max_iterations,
         bounds,
+        ct,
         [](const cz::weighted_point& p) -> cz::point {
             return p.pt;
         },
@@ -1073,13 +1087,13 @@ std::vector<cz::point> cz::perform_lloyd_relaxation(
                 .pt = new_pt,
                 .weight = old.weight,
                 .scale = old.scale
-            };
-        }
+                };
+            }
     );
 
-    return relaxed
-        | rv::transform([](const cz::weighted_point& p) -> cz::point {
-        return p.pt;
-            })
-        | r::to<std::vector>();
+    return relaxed | rv::transform(
+        [](const cz::weighted_point& p) -> cz::point {
+            return p.pt;
+        }
+    )| r::to<std::vector>();
 }

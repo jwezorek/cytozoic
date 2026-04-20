@@ -637,33 +637,13 @@ namespace {
 
     QString center_type_to_string(cz::center_type type)
     {
-        switch (type) {
-        case cz::center_type::incircle:
-            return QStringLiteral("incircle");
-
-        case cz::center_type::johnson_ellipse:
-            return QStringLiteral("johnson ellipse");
-
-        case cz::center_type::center_of_mass:
-            return QStringLiteral("center of mass");
-        }
-
-        return QStringLiteral("incircle");
+        return { cz::center_type_to_string(type).c_str() };
     }
 
     cz::center_type center_type_from_combo(const QComboBox* combo)
     {
         const QString value = combo->currentData().toString();
-
-        if (value == QStringLiteral("johnson_ellipse")) {
-            return cz::center_type::johnson_ellipse;
-        }
-
-        if (value == QStringLiteral("center_of_mass")) {
-            return cz::center_type::center_of_mass;
-        }
-
-        return cz::center_type::incircle;
+        return cz::center_type_from_string(value.toStdString());
     }
 
 } // namespace
@@ -1006,7 +986,7 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
         std::get_if<cz::cell_based_birth>(&params.birth_params)) {
         cell_birth_radio_->setChecked(true);
         cell_spawn_site_combo_->setCurrentText(
-            center_type_to_string(cell_birth->spawn_site)
+            cz::center_type_to_string(cell_birth->spawn_site).c_str()
         );
     }
     else {
