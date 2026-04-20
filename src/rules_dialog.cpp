@@ -971,7 +971,8 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
     );
 
     if (const auto* vertex_birth =
-        std::get_if<cz::vertex_based_birth>(&params.birth_params)) {
+            std::get_if<cz::vertex_based_birth>(&params.birth_params)) {
+
         vertex_birth_radio_->setChecked(true);
 
         vert_indexer_combo_->setCurrentText(
@@ -980,16 +981,19 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
                 QStringLiteral("sum of states")
             )
         );
-    }
-    else if (const auto* cell_birth =
+
+    } else if (const auto* cell_birth =
         std::get_if<cz::cell_based_birth>(&params.birth_params)) {
+
         cell_birth_radio_->setChecked(true);
         cell_spawn_site_combo_->setCurrentText(
             cz::center_type_to_string(cell_birth->spawn_site).c_str()
         );
-    }
-    else {
+
+    }  else {
+
         vertex_birth_radio_->setChecked(true);
+
     }
 
     rebuild_tables();
