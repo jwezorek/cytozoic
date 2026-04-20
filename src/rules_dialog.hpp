@@ -1,3 +1,5 @@
+#pragma once
+
 #include <QDialog>
 #include <QtWidgets>
 
@@ -31,6 +33,14 @@ namespace cz {
         QWidget* cell_birth_page_ = nullptr;
         QComboBox* cell_spawn_site_combo_ = nullptr;
         QTableWidget* cell_birth_table_ = nullptr;
+
+        void build_initial_tab();
+        void build_cell_tab();
+        void build_birth_tab();
+
+        void initialize_from_params(const cyto_params& params);
+        void connect_rebuild_signals();
+        void connect_birth_mode_signals();
 
         void rebuild_tables();
         void refresh_birth_mode_ui();
