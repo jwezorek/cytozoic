@@ -34,7 +34,9 @@ namespace {
 
     constexpr int k_min_cells = 20;
     constexpr int k_max_cells = 10000;
+
     int g_cell_death_probability_percent = 25;
+    int g_cell_birth_death_probability_percent = 25;
 
     class palette_editor : public QWidget {
     public:
@@ -533,6 +535,17 @@ namespace {
         return fallback;
     }
 
+    cz::state_table make_default_state_table(int rows, int columns)
+    {
+        return cz::state_table(
+            static_cast<std::size_t>(std::max(0, rows)),
+            cz::state_table_row(
+                static_cast<std::size_t>(std::max(0, columns)),
+                -1
+            )
+        );
+    }
+
     void randomize_cell_table(
         QTableWidget* table,
         int num_states,
@@ -723,7 +736,7 @@ void cz::rules_dialog::rebuild_tables()
         rebuild_state_table(
             cell_birth_table_,
             num_states,
-            1,
+            cell_columns,
             min_value,
             max_value
         );
@@ -919,28 +932,41 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
         new QLabel(tr("Spawn site"), cell_birth_page_);
     cell_spawn_site_combo_ = new QComboBox(cell_birth_page_);
     for (auto ct : cz::center_types() | rv::transform(center_type_to_string)) {
-        cell_spawn_site_combo_->addItem(
-            QString(ct.c_str())
-        );
+        cell_spawn_site_combo_->addItem(ct.c_str(), ct.c_str());
     }
-
-    auto* cell_birth_info = new QLabel(
-        tr("Cell-based birth is not yet implemented in the simulation core. "
-            "These controls are present so the dialog matches the new params "
-            "layout and can round-trip the new variant type."),
-        cell_birth_page_
-    );
-    cell_birth_info->setWordWrap(true);
 
     cell_birth_table_ = new QTableWidget(cell_birth_page_);
     cell_birth_table_->setAlternatingRowColors(true);
+
+    auto* cell_birth_random_group =
+        new QGroupBox(tr("Random Generation"), cell_birth_page_);
+    auto* cell_birth_random_layout = new QHBoxLayout(cell_birth_random_group);
+
+    auto* cell_birth_death_probability_label =
+        new QLabel(tr("Death probability"), cell_birth_random_group);
+    auto* cell_birth_death_probability_spin =
+        new QSpinBox(cell_birth_random_group);
+    cell_birth_death_probability_spin->setRange(0, 100);
+    cell_birth_death_probability_spin->setSuffix(tr("%"));
+    cell_birth_death_probability_spin->setValue(
+        g_cell_birth_death_probability_percent
+    );
+
+    auto* cell_birth_randomize_button =
+        new QPushButton(tr("Generate Random States"), cell_birth_random_group);
+
+    cell_birth_random_layout->addWidget(cell_birth_death_probability_label);
+    cell_birth_random_layout->addWidget(cell_birth_death_probability_spin);
+    cell_birth_random_layout->addSpacing(16);
+    cell_birth_random_layout->addWidget(cell_birth_randomize_button);
+    cell_birth_random_layout->addStretch();
 
     cell_birth_top_grid->addWidget(cell_spawn_site_label, 0, 0);
     cell_birth_top_grid->addWidget(cell_spawn_site_combo_, 0, 1);
 
     cell_birth_layout->addLayout(cell_birth_top_grid);
-    cell_birth_layout->addWidget(cell_birth_info);
     cell_birth_layout->addWidget(cell_birth_table_);
+    cell_birth_layout->addWidget(cell_birth_random_group);
 
     birth_mode_stack_->addWidget(vertex_birth_page_);
     birth_mode_stack_->addWidget(cell_birth_page_);
@@ -971,8 +997,7 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
     );
 
     if (const auto* vertex_birth =
-            std::get_if<cz::vertex_based_birth>(&params.birth_params)) {
-
+        std::get_if<cz::vertex_based_birth>(&params.birth_params)) {
         vertex_birth_radio_->setChecked(true);
 
         vert_indexer_combo_->setCurrentText(
@@ -981,19 +1006,16 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
                 QStringLiteral("sum of states")
             )
         );
-
-    } else if (const auto* cell_birth =
+    }
+    else if (const auto* cell_birth =
         std::get_if<cz::cell_based_birth>(&params.birth_params)) {
-
         cell_birth_radio_->setChecked(true);
         cell_spawn_site_combo_->setCurrentText(
             cz::center_type_to_string(cell_birth->spawn_site).c_str()
         );
-
-    }  else {
-
+    }
+    else {
         vertex_birth_radio_->setChecked(true);
-
     }
 
     rebuild_tables();
@@ -1048,7 +1070,20 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
         vertex_birth_radio_,
         &QRadioButton::toggled,
         this,
-        [&](bool) {
+        [this](bool checked) {
+            if (!checked) {
+                return;
+            }
+
+            vert_indexer_combo_->setCurrentText(QStringLiteral("sum of states"));
+            rebuild_tables();
+            set_state_table_row_values(
+                vertex_table_,
+                cz::state_table_row(
+                    static_cast<std::size_t>(vertex_table_->columnCount()),
+                    -1
+                )
+            );
             refresh_birth_mode_ui();
         }
     );
@@ -1057,7 +1092,23 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
         cell_birth_radio_,
         &QRadioButton::toggled,
         this,
-        [&](bool) {
+        [this](bool checked) {
+            if (!checked) {
+                return;
+            }
+
+            if (cell_spawn_site_combo_->count() > 0) {
+                cell_spawn_site_combo_->setCurrentIndex(0);
+            }
+
+            rebuild_tables();
+            set_state_table_values(
+                cell_birth_table_,
+                make_default_state_table(
+                    cell_birth_table_->rowCount(),
+                    cell_birth_table_->columnCount()
+                )
+            );
             refresh_birth_mode_ui();
         }
     );
@@ -1083,6 +1134,31 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
                 cell_table_,
                 num_states_combo_->currentData().toInt(),
                 g_cell_death_probability_percent
+            );
+        }
+    );
+
+    connect(
+        cell_birth_death_probability_spin,
+        qOverload<int>(&QSpinBox::valueChanged),
+        this,
+        [](int value) {
+            g_cell_birth_death_probability_percent = value;
+        }
+    );
+
+    connect(
+        cell_birth_randomize_button,
+        &QPushButton::clicked,
+        this,
+        [this, cell_birth_death_probability_spin]() {
+            g_cell_birth_death_probability_percent =
+                cell_birth_death_probability_spin->value();
+
+            randomize_cell_table(
+                cell_birth_table_,
+                num_states_combo_->currentData().toInt(),
+                g_cell_birth_death_probability_percent
             );
         }
     );
