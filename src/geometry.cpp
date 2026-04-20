@@ -415,12 +415,12 @@ std::string cz::center_type_to_string(center_type ct) {
 }
 
 cz::center_type cz::center_type_from_string(const std::string& value) {
-    if (value == "chebyshev center") {
-        return cz::center_type::chebyshev;
+    if (value.empty() || value == "area centroid") {
+        return cz::center_type::area_centroid;
     }
 
-    if (value == "area centroid") {
-        return cz::center_type::area_centroid;
+    if (value == "chebyshev center") {
+        return cz::center_type::chebyshev;
     }
 
     if (value == "mean vertex") {
@@ -432,6 +432,14 @@ cz::center_type cz::center_type_from_string(const std::string& value) {
     }
 
     throw std::runtime_error("unrecognized center_type string.");
+}
+
+std::vector<cz::center_type> cz::center_types() {
+    return rv::iota(size_t{ 0 }, k_num_center_types) | rv::transform(
+        [](auto i) {
+            return static_cast<center_type>(i);
+        }
+    ) | r::to<std::vector>();
 }
 
 cz::point cz::center(std::span<const point> poly, center_type ct) {

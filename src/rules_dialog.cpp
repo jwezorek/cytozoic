@@ -27,6 +27,9 @@
 #include <ranges>
 #include <vector>
 
+namespace r = std::ranges;
+namespace rv = std::ranges::views;
+
 namespace {
 
     constexpr int k_min_cells = 20;
@@ -915,15 +918,11 @@ cz::rules_dialog::rules_dialog(QWidget* parent, const cyto_params& params)
     auto* cell_spawn_site_label =
         new QLabel(tr("Spawn site"), cell_birth_page_);
     cell_spawn_site_combo_ = new QComboBox(cell_birth_page_);
-    cell_spawn_site_combo_->addItem(tr("Incircle"), QStringLiteral("incircle"));
-    cell_spawn_site_combo_->addItem(
-        tr("Johnson ellipse"),
-        QStringLiteral("johnson_ellipse")
-    );
-    cell_spawn_site_combo_->addItem(
-        tr("Center of mass"),
-        QStringLiteral("center_of_mass")
-    );
+    for (auto ct : cz::center_types() | rv::transform(center_type_to_string)) {
+        cell_spawn_site_combo_->addItem(
+            QString(ct.c_str())
+        );
+    }
 
     auto* cell_birth_info = new QLabel(
         tr("Cell-based birth is not yet implemented in the simulation core. "
