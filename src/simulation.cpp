@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <utility>
 
+/*------------------------------------------------------------------------------------------------*/
+
 namespace {
 
     constexpr int k_min_frame_spacing_ms = 16;
@@ -93,9 +95,7 @@ void cz::simulation_thread::run()
             return;
         }
 
-        emit initial_frame_ready(
-            cz::to_cyto_frame(current_state_, params.palette, {})
-        );
+        emit initial_frame_ready( cz::to_cyto_frame(current_state_, params.palette, {}) );
 
         if (current_state_.empty()) {
             emit simulation_stopped();
@@ -104,14 +104,8 @@ void cz::simulation_thread::run()
 
         while (!is_stop_requested()) {
             if (mode == simulation_presentation_mode::animated) {
-                auto result = cz::apply_state_tables_animated(
-                    id_source_,
-                    current_state_,
-                    params.cell_state_table,
-                    params.cell_indexer,
-                    params.birth_params,
-                    params.palette
-                );
+                auto result = 
+                    cz::apply_state_tables_animated( id_source_, current_state_, params );
 
                 if (is_stop_requested()) {
                     break;
@@ -127,9 +121,8 @@ void cz::simulation_thread::run()
                     transition_finished_ = false;
                 }
 
-                emit transition_ready(
-                    std::move(result.anim_start),
-                    std::move(result.anim_end)
+                emit transition_ready( 
+                    std::move(result.anim_start), std::move(result.anim_end) 
                 );
 
                 if (!wait_for_transition_finished()) {
@@ -143,9 +136,7 @@ void cz::simulation_thread::run()
                 current_state_ = cz::apply_state_tables_quick(
                     id_source_,
                     current_state_,
-                    params.cell_state_table,
-                    params.cell_indexer,
-                    params.birth_params
+                    params
                 );
 
                 if (is_stop_requested()) {

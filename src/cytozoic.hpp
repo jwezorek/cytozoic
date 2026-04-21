@@ -132,18 +132,13 @@ namespace cz {
     state_table_result apply_state_tables_animated(
         cell_id_source& id_source,
         const cyto_state& state,
-        const state_table& cell_tbl,
-        const neighborhood_indexer& cell_indexer,
-        const birth_parameters& birth,
-        const color_table& palette
+        const cyto_params& params
     );
 
     cyto_state apply_state_tables_quick(
         cell_id_source& id_source,
         const cyto_state& state,
-        const state_table& cell_tbl,
-        const neighborhood_indexer& cell_indexer,
-        const birth_parameters& birth
+        const cyto_params& params
     );
 
 }

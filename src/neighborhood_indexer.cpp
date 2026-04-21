@@ -25,15 +25,15 @@ namespace {
         ),
 
         pro::make_proxy<cz::neighborhood_indexer_facade>(
-            cz::trinary_histogram_indexer{}
-        ),
-
-        pro::make_proxy<cz::neighborhood_indexer_facade>(
-            cz::quarternary_histogram_indexer{}
-        ),
-
-        pro::make_proxy<cz::neighborhood_indexer_facade>(
             cz::min_max_state_indexer{}
+        ),
+
+        pro::make_proxy<cz::neighborhood_indexer_facade>(
+            cz::binary_histogram_indexer{}
+        ),
+
+        pro::make_proxy<cz::neighborhood_indexer_facade>(
+            cz::trinary_histogram_indexer{}
         )
     };
 
@@ -48,18 +48,12 @@ namespace {
         return 2;
     }
 
-    int to_quarternary_digit(int count) {
-        if (count <= 0) {
+    int to_binary_digit(int count) {
+        if (count <= 1) {
             return 0;
         }
-        else if (count == 1) {
-            return 1;
-        }
-        else if (count <= 3) {
-            return 2;
-        }
 
-        return 3;
+        return 1;
     }
 
     std::size_t a_to_the_nth(int a, std::size_t n) {
@@ -72,29 +66,18 @@ namespace {
         return value;
     }
 
-    std::size_t trinary_to_integer(const std::vector<int>& digits) {
+    std::size_t n_ary_to_integer(const std::vector<int>& digits, int n) {
         std::size_t value = 0;
         std::size_t place = 1;
 
         for (int digit : digits) {
             value += static_cast<std::size_t>(digit) * place;
-            place *= 3;
+            place *= n;
         }
 
         return value;
     }
 
-    std::size_t quarternary_to_integer(const std::vector<int>& digits) {
-        std::size_t value = 0;
-        std::size_t place = 1;
-
-        for (int digit : digits) {
-            value += static_cast<std::size_t>(digit) * place;
-            place *= 4;
-        }
-
-        return value;
-    }
 
 } // namespace
 
@@ -217,6 +200,62 @@ std::string cz::max_state_indexer::name() const
 
 /*------------------------------------------------------------------------------------------------*/
 
+std::size_t cz::binary_histogram_indexer::column_index(
+    const std::vector<int8_t>& neighbor_states,
+    std::size_t num_states) const
+{
+    if (num_states == 0) {
+        throw std::runtime_error(
+            "binary_histogram_indexer requires num_states > 0."
+        );
+    }
+
+    std::vector<int> histogram(num_states, 0);
+
+    for (int8_t s : neighbor_states) {
+        if (s < 0) {
+            throw std::runtime_error(
+                "binary_histogram_indexer requires non-negative states."
+            );
+        }
+
+        const auto state = static_cast<std::size_t>(s);
+
+        if (state >= num_states) {
+            throw std::runtime_error(
+                "binary_histogram_indexer received a state outside the valid range."
+            );
+        }
+
+        ++histogram[state];
+    }
+
+    const auto digits =  histogram | rv::transform(
+            to_binary_digit
+        ) | r::to<std::vector>();
+
+    return n_ary_to_integer(digits, 2);
+}
+
+std::size_t cz::binary_histogram_indexer::num_columns(
+    std::size_t num_states) const
+{
+    if (num_states == 0) {
+        throw std::runtime_error(
+            "binary_histogram_indexer requires num_states > 0."
+        );
+    }
+
+    return a_to_the_nth(2, num_states);
+}
+
+std::string cz::binary_histogram_indexer::name() const
+{
+    return "binary histogram";
+}
+
+/*------------------------------------------------------------------------------------------------*/
+
 std::size_t cz::trinary_histogram_indexer::column_index(
     const std::vector<int8_t>& neighbor_states,
     std::size_t num_states) const
@@ -247,12 +286,11 @@ std::size_t cz::trinary_histogram_indexer::column_index(
         ++histogram[state];
     }
 
-    const auto digits =
-        histogram
-        | rv::transform(to_trinary_digit)
-        | r::to<std::vector>();
+    const auto digits = histogram | rv::transform(
+            to_trinary_digit
+        ) | r::to<std::vector>();
 
-    return trinary_to_integer(digits);
+    return n_ary_to_integer(digits, 3);
 }
 
 std::size_t cz::trinary_histogram_indexer::num_columns(
@@ -270,61 +308,6 @@ std::size_t cz::trinary_histogram_indexer::num_columns(
 std::string cz::trinary_histogram_indexer::name() const
 {
     return "trinary histogram";
-}
-
-/*------------------------------------------------------------------------------------------------*/
-
-std::size_t cz::quarternary_histogram_indexer::column_index(
-    const std::vector<int8_t>& neighbor_states,
-    std::size_t num_states) const
-{
-    if (num_states == 0) {
-        throw std::runtime_error(
-            "quarternary_histogram_indexer requires num_states > 0."
-        );
-    }
-
-    std::vector<int> histogram(num_states, 0);
-
-    for (int8_t s : neighbor_states) {
-        if (s < 0) {
-            throw std::runtime_error(
-                "quarternary_histogram_indexer requires non-negative states."
-            );
-        }
-
-        const auto state = static_cast<std::size_t>(s);
-
-        if (state >= num_states) {
-            throw std::runtime_error(
-                "quarternary_histogram_indexer received a state outside the valid range."
-            );
-        }
-
-        ++histogram[state];
-    }
-
-    const auto digits =
-        histogram | rv::transform(to_quarternary_digit) | r::to<std::vector>();
-
-    return quarternary_to_integer(digits);
-}
-
-std::size_t cz::quarternary_histogram_indexer::num_columns(
-    std::size_t num_states) const
-{
-    if (num_states == 0) {
-        throw std::runtime_error(
-            "quarternary_histogram_indexer requires num_states > 0."
-        );
-    }
-
-    return a_to_the_nth(4, num_states);
-}
-
-std::string cz::quarternary_histogram_indexer::name() const
-{
-    return "quarternary histogram";
 }
 
 /*------------------------------------------------------------------------------------------------*/

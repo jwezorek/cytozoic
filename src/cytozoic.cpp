@@ -1,7 +1,7 @@
 #include "cytozoic.hpp"
 #include "geometry.hpp"
 #include "voronoi.hpp"
-
+#include <qdebug.h>
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -42,6 +42,7 @@ namespace
         cz::point site;
         int8_t state;
         std::vector<cz::cell_id> neighbors;
+        cz::polygon poly;
     };
 
     struct vertex_neighborhood
@@ -252,11 +253,11 @@ namespace
             return snapshot;
         }
 
-        const auto sites = live_cells
-            | rv::transform([](const cz::cell_state& cell) -> cz::point {
-            return cell.site;
-                })
-            | r::to<std::vector>();
+        const auto sites = live_cells | rv::transform(
+                [](const cz::cell_state& cell) -> cz::point {
+                    return cell.site;
+                }
+            ) | r::to<std::vector>();
 
         const auto diagram = cz::to_voronoi_diagram(sites);
 
@@ -296,7 +297,8 @@ namespace
                     .id = src.id,
                     .site = src.site,
                     .state = src.state,
-                    .neighbors = std::move(neighbor_ids)
+                    .neighbors = std::move(neighbor_ids),
+                    .poly = diagram.polygons[i]
                 }
             );
 
@@ -374,11 +376,11 @@ namespace
             return scale_by_id;
         }
 
-        const auto sites = state
-            | rv::transform([](const cz::cell_state& cell) -> cz::point {
-            return cell.site;
-                })
-            | r::to<std::vector>();
+        const auto sites = state | rv::transform(
+                [](const cz::cell_state& cell) -> cz::point {
+                    return cell.site;
+                }
+            ) | r::to<std::vector>();
 
         const auto polygons = cz::to_voronoi_polygons(sites);
 
@@ -478,11 +480,11 @@ namespace
         std::vector<cz::point> relaxed_sites;
 
         if (scales.empty()) {
-            const auto sites = state
-                | rv::transform([](const cz::cell_state& cell) -> cz::point {
-                return cell.site;
-                    })
-                | r::to<std::vector>();
+            const auto sites = state | rv::transform(
+                    [](const cz::cell_state& cell) -> cz::point {
+                        return cell.site;
+                    }
+                ) | r::to<std::vector>();
 
             relaxed_sites = cz::perform_lloyd_relaxation(
                 sites,
@@ -540,7 +542,6 @@ namespace
             }
 
             const auto state_index = static_cast<std::size_t>(cell.state);
-
             if (state_index >= cell_tbl.size()) {
                 throw std::runtime_error(
                     "apply_cell_table: cell state is out of range for cell_tbl."
@@ -623,11 +624,54 @@ namespace
         return add_list;
     }
 
-    std::vector<cz::cell_state> do_cell_birth(
-            const cz::birth_parameters& params,
+    std::vector<cz::cell_state> apply_cell_birth_table(
             cz::cell_id_source& id_source,
-            const topology_snapshot& snapshot,
-            size_t num_states ) {
+            const cell_graph& graph,
+            const cz::neighborhood_indexer& indexer,
+            cz::center_type spawn_site,
+            const cz::state_table& state_table) {
+
+        std::vector<cz::cell_state> add_list;
+        auto num_states = static_cast<int>(state_table.size());
+
+        for (const auto& cell : graph | rv::values) {
+            const auto neighborhood_states = cell.neighbors | rv::transform(
+                    [&](cz::cell_id id) -> int8_t {
+                        return graph.at(id).state;
+                    }
+                ) | r::to<std::vector>();
+
+            const std::size_t column =
+                indexer->column_index(neighborhood_states, num_states);
+
+            if (cell.state >= num_states || column >= state_table.front().size()) {
+                throw std::runtime_error(
+                    "apply_cell_birth_table: bounds error"
+                );
+            }
+
+            const int8_t spawn_state = state_table.at(cell.state).at(column);
+
+            if (spawn_state >= 0) {
+                add_list.push_back(
+                    cz::cell_state{
+                        .id = id_source.acquire(),
+                        .site = cz::center(cell.poly, spawn_site),
+                        .state = spawn_state,
+                        .phase = cz::life_stage::new_born
+                    }
+                );
+            }
+        }
+
+        return add_list;
+    }
+
+    std::vector<cz::cell_state> do_cell_birth(
+
+            const cz::cyto_params& params,
+            cz::cell_id_source& id_source,
+            const topology_snapshot& snapshot) {
 
         return std::visit(
             overload{
@@ -638,15 +682,20 @@ namespace
                         snapshot.vertex_neighborhoods,
                         vb.vertex_table,
                         vb.vertex_indexer,
-                        num_states
+                        params.cell_state_table.size()
                     );
                 },
                 [&](const cz::cell_based_birth& cb)->std::vector<cz::cell_state> {
-                    // TODO
-                    return {};
+                    return apply_cell_birth_table(
+                        id_source,
+                        snapshot.graph,
+                        params.cell_indexer,
+                        cb.spawn_site,
+                        cb.state_table
+                    );
                 }
             },
-            params
+            params.birth_params
         );
         
     }
@@ -1014,20 +1063,17 @@ cz::cyto_state_transition cz::generate_transition(
 cz::state_table_result cz::apply_state_tables_animated(
         cz::cell_id_source& id_source,
         const cz::cyto_state& current_state,
-        const cz::state_table& cell_tbl,
-        const cz::neighborhood_indexer& cell_indexer,
-        const birth_parameters& birth,
-        const cz::color_table& palette) {
+        const cz::cyto_params& params) {
 
     const auto snapshot = build_topology_snapshot(current_state);
 
     auto [next_state, delete_set] = apply_cell_table(
         snapshot.graph,
-        cell_tbl,
-        cell_indexer
+        params.cell_state_table,
+        params.cell_indexer
     );
 
-    const auto add_list = do_cell_birth(birth, id_source, snapshot, cell_tbl.size());
+    const auto add_list = do_cell_birth(params, id_source, snapshot);
 
     for (const auto& new_cell : add_list) {
         auto canonical_cell = new_cell;
@@ -1063,27 +1109,25 @@ cz::state_table_result cz::apply_state_tables_animated(
 
     return {
         next_state,
-        cz::to_cyto_frame(trans.from, palette, from_scales),
-        cz::to_cyto_frame(trans.to, palette, to_scales)
+        cz::to_cyto_frame(trans.from, params.palette, from_scales),
+        cz::to_cyto_frame(trans.to, params.palette, to_scales)
     };
 }
 
 cz::cyto_state cz::apply_state_tables_quick(
         cz::cell_id_source& id_source,
         const cz::cyto_state& current_state,
-        const cz::state_table& cell_tbl,
-        const cz::neighborhood_indexer& cell_indexer,
-        const birth_parameters& birth) {
+        const cyto_params& params) {
 
     const auto snapshot = build_topology_snapshot(current_state);
 
     auto [next_state, delete_set] = apply_cell_table(
         snapshot.graph,
-        cell_tbl,
-        cell_indexer
+        params.cell_state_table,
+        params.cell_indexer
     );
 
-    const auto add_list = do_cell_birth(birth, id_source, snapshot, cell_tbl.size());
+    const auto add_list = do_cell_birth(params, id_source, snapshot);
 
     for (auto id : delete_set) {
         id_source.release(id);
